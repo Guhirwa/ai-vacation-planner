@@ -6,7 +6,7 @@ from app.database import Base
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, autoincrement=True, index=True)
     email = Column(String(70), unique=True, nullable=False)
     username = Column(String(20), unique=True, nullable=False)
     hashed_password = Column(String(70), unique=True, nullable=False)
