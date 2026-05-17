@@ -1,6 +1,6 @@
 from datetime import timezone
 
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, Float, String, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -10,7 +10,7 @@ class Trip(Base):
     id = Column(Integer, primary_key=True, autoincrement=True, index=True)
     destination = Column(String(100), nullable=False)
     days = Column(Integer, nullable=False)
-    budget = Column(Integer, nullable=False)
+    budget = Column(Float, nullable=False)
     trip_style = Column(String(50), nullable=False)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
