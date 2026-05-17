@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     api_version: str = "1.0.0"
 
     class Config:
-        enc_file = ".env"
+        env_file = ".env"
 
 settings = Settings()
 
