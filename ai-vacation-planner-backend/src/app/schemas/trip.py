@@ -9,7 +9,7 @@ class TripCreate(BaseModel):
     budget: float = Field(..., ge=0)
     trip_style: str
 
-    @field_validator
+    @field_validator("trip_style", mode="before")
     @classmethod
     def validate_trip_style(cls, value: str) -> str:
         allowed = ["budget", "luxury", "family", "adventure", "romantic", "business"]
@@ -18,7 +18,7 @@ class TripCreate(BaseModel):
             raise ValueError(f"trip_style must be on of: {', '.join(allowed)}")
         return value_lower
 
-class TripResponse(BaseModel):
+class TripResponse(TripCreate):
     id: int
     user_id: int
     created_at: Optional[datetime] = None
