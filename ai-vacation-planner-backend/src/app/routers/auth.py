@@ -9,7 +9,7 @@ from app.utils.security import get_password_hash, verify_password, create_access
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def register(user: UserCreate, database: Session = Depends(get_database())):
+def register(user: UserCreate, database: Session = Depends(get_database)):
     existing_user = database.query(User).filter(
         (User.email == user.email) | (User.username == user.username)
     ).first()
@@ -24,7 +24,7 @@ def register(user: UserCreate, database: Session = Depends(get_database())):
     return database_user
 
 @router.post("/login", response_model=Token)
-def login(user: UserLogin, database: Session = Depends(get_database())):
+def login(user: UserLogin, database: Session = Depends(get_database)):
     database_user = database.query(User).filter(User.username == user.username).first()
 
     if not database_user or not verify_password(user.password, database_user.hashed_password):
@@ -33,5 +33,5 @@ def login(user: UserLogin, database: Session = Depends(get_database())):
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.get("/users.me", response_model=UserOut)
-def get_current_user_info(current_user: User = Depends(get_current_user())):
+def get_current_user_info(current_user: User = Depends(get_current_user)):
     return current_user

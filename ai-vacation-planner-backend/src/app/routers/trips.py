@@ -8,7 +8,7 @@ from app.schemas.trip import TripResponse, TripCreate, TripUpdate
 router = APIRouter(prefix="/trips", tags=["Trips"])
 
 @router.post("/", response_model=TripResponse, status_code=status.HTTP_201_CREATED)
-def create_trip(trip: TripCreate, database: Session = Depends(get_database()), current_user: User = Depends(get_current_user())):
+def create_trip(trip: TripCreate, database: Session = Depends(get_database), current_user: User = Depends(get_current_user)):
     new_trip = Trip(
         destination=trip.destination,
         days=trip.days,
@@ -31,19 +31,19 @@ def create_trip(trip: TripCreate, database: Session = Depends(get_database()), c
     )
 
 @router.get("/")
-def get_all_trips(database: Session = Depends(get_database()), current_user: User = Depends(get_current_user)):
+def get_all_trips(database: Session = Depends(get_database), current_user: User = Depends(get_current_user)):
     trips = database.query(Trip).filter(Trip.user_id == current_user.id).all()
     return trips
 
 @router.get("/{trip_id}")
-def get_trip(trip_id: int, database: Session = Depends(get_database()), current_user: User = Depends(get_current_user())):
+def get_trip(trip_id: int, database: Session = Depends(get_database), current_user: User = Depends(get_current_user)):
     trip = database.query(Trip).filter(Trip.id == trip_id, Trip.user_id == current_user.id)
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
     return trip
 
 @router.put("/{trip_id}")
-def update_trip(trip_id: int, trip_update: TripUpdate, database: Session = Depends(get_database()), current_user = Depends(get_current_user())):
+def update_trip(trip_id: int, trip_update: TripUpdate, database: Session = Depends(get_database), current_user = Depends(get_current_user)):
     trip = database.query(Trip).filter(Trip.id == trip_id,Trip.user_id == current_user.id).first()
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
@@ -54,7 +54,7 @@ def update_trip(trip_id: int, trip_update: TripUpdate, database: Session = Depen
     return {"message": "Trip updated successfully"}
 
 @router.delete("/{trip_id}")
-def delete_trip(trip_id: int, database: Session = Depends(get_database()), current_user: User = Depends(get_current_user())):
+def delete_trip(trip_id: int, database: Session = Depends(get_database), current_user: User = Depends(get_current_user)):
     trip = database.query(User).filter(Trip.id == trip_id, Trip.user_id == current_user.id).first()
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
