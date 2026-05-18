@@ -6,11 +6,11 @@ from app.config import settings
 from app.database import get_database
 from app.models import User
 
-security = HTTPBearer
+security = HTTPBearer()
 
 def get_current_user(
         credentials: HTTPAuthorizationCredentials = Depends(security),
-        database: Session = Depends(get_database())
+        database: Session = Depends(get_database)
 ):
     token = credentials.credentials
     credentials_exception = HTTPException(
