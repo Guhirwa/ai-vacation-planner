@@ -10,7 +10,7 @@ class UserCreate(BaseModel):
     password: str = Field(..., min_length=8)
 
 class UserLogin(BaseModel):
-    username: str
+    email: EmailStr
     password: str
 
 class UserOut(BaseModel):
@@ -20,7 +20,7 @@ class UserOut(BaseModel):
     created_at: Optional[datetime] = None
 
     class Config:
-        from_attribute = True
+        from_attributes = True
 
 class Token(BaseModel):
     access_token: str

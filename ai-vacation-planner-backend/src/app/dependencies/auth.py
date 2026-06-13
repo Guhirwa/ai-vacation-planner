@@ -8,18 +8,21 @@ from app.models import User
 
 security = HTTPBearer()
 
+
 def get_current_user(
-        credentials: HTTPAuthorizationCredentials = Depends(security),
-        database: Session = Depends(get_database)
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    database: Session = Depends(get_database),
 ):
     token = credentials.credentials
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"}
+        headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        payload = jwt.decode(
+            token, settings.secret_key, algorithms=[settings.algorithm]
+        )
         user_id: int = payload.get("sub")
         if user_id is None:
             raise credentials_exception
