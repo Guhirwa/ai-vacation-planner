@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.database import get_database
 from app.models.itinerary import Itinerary
 from app.models.trip import Trip
-from app.schemas.itinerary import ItineraryCreate, ItineraryResponse
+from app.schemas.itinerary import ItineraryCreate, ItineraryResponse, DayActivity
 from app.dependencies.auth import get_current_user
 from app.models.user import User
 
@@ -31,7 +31,7 @@ def create_itinerary(itinerary: ItineraryCreate, database: Session = Depends(get
         updated_at=database_itinerary.updated_at
     )
 
-@router.get("/{trip_id}")
+@router.get("/{trip_id}", response_model=ItineraryResponse)
 def get_itinerary(trip_id: int, database: Session = Depends(get_database), current_user: User = Depends(get_current_user)):
     trip = database.query(Trip).filter(Trip.id == trip_id, Trip.user_id == current_user.id).first()
     if not trip:
@@ -41,9 +41,9 @@ def get_itinerary(trip_id: int, database: Session = Depends(get_database), curre
     if not itinerary:
         raise HTTPException(status_code=404, detail="Itinerary not found")
 
-    return {
-        "trip_id": trip_id,
-        "itinerary": itinerary.days_data,
-        "created_at": itinerary.created_at,
-        "updated_at": itinerary.updated_at
-    }
+    return ItineraryResponse(
+        trip_id=trip_id,
+        itinerary=[DayActivity(**day) for day in itinerary.days_data],
+        created_at=itinerary.created_at,
+        updated_at=itinerary.updated_at
+    )

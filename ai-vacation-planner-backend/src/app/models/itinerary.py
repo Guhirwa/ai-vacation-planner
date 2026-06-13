@@ -13,4 +13,4 @@ class Itinerary(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    trip = relationship("Trip", back_populates="itinerary", cascade="all, delete-orphan")
+    trip = relationship("Trip", back_populates="itinerary")

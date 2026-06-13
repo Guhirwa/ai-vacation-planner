@@ -5,8 +5,9 @@ from pydantic import BaseModel, Field, field_validator
 
 class DayActivity(BaseModel):
     day: int = Field(..., ge=1)
-    activity: List[str] = Field(..., min_length=1)
-    @field_validator("activity", mode="before")
+    activities: List[str] = Field(..., min_length=1)
+
+    @field_validator("activities", mode="before")
     @classmethod
     def validate_activities(cls, value: List[str]) -> List[str]:
         return [activity.strip() for activity in value if activity.strip()]
