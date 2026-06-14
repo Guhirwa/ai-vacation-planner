@@ -1,0 +1,33 @@
+# Poetry
+poetry.lock
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# IDE
+.idea/
+*swp
+
+# MyPy
+.mypy_cache/
+
+# Ruff
+.ruff_cache/
+
+#Environment
+.env
+.env.*
+!.env.example
+
+#Database
+*.db
+*.sqlite
+*.sqlite3
+
+#Testing
+.pytest_cache
+.coverage
+htmlcov/
