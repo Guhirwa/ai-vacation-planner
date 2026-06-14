@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     database_url: str = "sqlite:///./ai_vacation_planner.db"
     secret_key: str = Field(...)
+    anthropic_api_key: str = Field(...)
     algorithm: str = "HS256"
     access_token_expire_in: int = 30
     debug: bool = True
