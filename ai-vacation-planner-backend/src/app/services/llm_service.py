@@ -5,7 +5,7 @@ from app.config import settings
 
 _client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
-MODEL = "claude-sonnet-4-6"
+MODEL = "claude-haiku-4-5"
 
 SYSTEM_PROMPT = """You are an expert travel planner with deep knowledge of destinations worldwide.
 
