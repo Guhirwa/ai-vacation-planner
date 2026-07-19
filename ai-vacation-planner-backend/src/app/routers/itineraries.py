@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 from app.database import get_database
 from app.models.itinerary import Itinerary
@@ -11,7 +12,8 @@ from app.services.llm_service import generate_itinerary
 router = APIRouter(prefix="/itineraries", tags=["Itineraries"])
 
 
-@router.post("/", response_model=ItineraryResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ItineraryResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=ItineraryResponse, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 async def create_itinerary(
     itinerary: ItineraryCreate,
     database: Session = Depends(get_database),
@@ -33,7 +35,10 @@ async def create_itinerary(
         raw_days = await generate_itinerary(
             trip.destination, trip.days, trip.budget, trip.trip_style
         )
-        days_list = [DayActivity(**d) for d in raw_days]
+        try:
+            days_list = [DayActivity(**d) for d in raw_days]
+        except (ValidationError, TypeError):
+            raise HTTPException(status_code=500, detail="LLM returned an activity in an unexpected format")
     else:
         days_list = itinerary.days
 

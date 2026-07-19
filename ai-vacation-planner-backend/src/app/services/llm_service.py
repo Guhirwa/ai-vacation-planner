@@ -1,5 +1,5 @@
 import json
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, APIConnectionError, APIStatusError
 from fastapi import HTTPException
 from app.config import settings
 
@@ -26,6 +26,7 @@ _STYLE_DESCRIPTIONS = {
     "family": "family-friendly attractions, casual dining, easy transport options",
     "adventure": "outdoor adventures, active experiences, local casual dining",
     "romantic": "scenic spots, intimate dining, comfortable private transport",
+    "business": "work-focused travel, business hotels, professional dining, convenient transport",
 }
 
 
@@ -55,12 +56,19 @@ Respond with ONLY a JSON object in this exact format — no extra text before or
 
 
 async def generate_itinerary(destination: str, days: int, budget: float, trip_style: str) -> list[dict]:
-    response = await _client.messages.create(
-        model=MODEL,
-        max_tokens=4096,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": _build_user_prompt(destination, days, budget, trip_style)}],
-    )
+    try:
+        response = await _client.messages.create(
+            model=MODEL,
+            max_tokens=4096,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": _build_user_prompt(destination, days, budget, trip_style)}],
+        )
+    except APIStatusError:
+        raise HTTPException(status_code=500, detail="AI itinerary generation is temporarily unavailable")
+    except APIConnectionError:
+        raise HTTPException(status_code=500, detail="Could not reach the AI itinerary generation service")
+    except Exception:
+        raise HTTPException(status_code=500, detail="AI itinerary generation failed unexpectedly")
 
     raw = response.content[0].text.strip()
 

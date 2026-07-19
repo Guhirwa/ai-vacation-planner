@@ -9,7 +9,8 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(
     title=settings.app_name,
     version=settings.api_version,
-    debug=settings.debug
+    debug=settings.debug,
+    redirect_slashes=False
 )
 
 app.include_router(auth.router)
