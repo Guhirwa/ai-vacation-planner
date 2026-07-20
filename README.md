@@ -43,7 +43,7 @@ ai-vacation-planner/
 
 ## LLM Integration
 
-**Model:** Anthropic Claude (`claude-sonnet-4-6`)
+**Model:** Anthropic Claude (`claude-haiku-4-5`)
 **Trigger:** `POST /itineraries/` with `generate_with_ai: true`
 
 **Flow:**
@@ -200,7 +200,7 @@ curl -X POST http://localhost:8000/itineraries/ \
 
 **How it works**
 - `POST /itineraries/` accepts an optional `generate_with_ai` boolean field (default: `false`)
-- When `generate_with_ai` is `true`, the backend reads the trip details from the database, builds a prompt using destination, days, budget, and trip_style, and calls Claude (`claude-sonnet-4-6`) to generate a realistic day-by-day itinerary
+- When `generate_with_ai` is `true`, the backend reads the trip details from the database, builds a prompt using destination, days, budget, and trip_style, and calls Claude (`claude-haiku-4-5`) to generate a realistic day-by-day itinerary
 - The generated itinerary is saved to the database and returned in the same format as a manually created one
 
 **Modes**
