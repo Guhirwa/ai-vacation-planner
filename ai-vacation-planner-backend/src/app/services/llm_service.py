@@ -1,7 +1,21 @@
+"""LLM-backed itinerary generation service.
+
+Uses the Anthropic Claude API (model: claude-haiku-4-5) to turn a set of
+trip details into a day-by-day travel itinerary. Generation follows a
+two-prompt architecture: a fixed SYSTEM_PROMPT establishes the assistant's
+role and global constraints (realism, geographic accuracy, budget rules,
+JSON-only output), while a per-request user prompt (built by
+_build_user_prompt) supplies the specific trip details. The raw model
+response is stripped of markdown formatting, parsed as JSON, and validated
+against LLMItineraryOutput before being returned to the caller.
+"""
+
 import json
 from anthropic import AsyncAnthropic, APIConnectionError, APIStatusError
 from fastapi import HTTPException
+from pydantic import ValidationError
 from app.config import settings
+from app.schemas.itinerary import LLMItineraryOutput
 
 _client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
@@ -31,6 +45,18 @@ _STYLE_DESCRIPTIONS = {
 
 
 def _build_user_prompt(destination: str, days: int, budget: float, trip_style: str) -> str:
+    """Build the user-facing prompt sent to the LLM for itinerary generation.
+
+    Args:
+        destination: The travel destination (e.g. "Paris").
+        days: Number of days the trip lasts.
+        budget: Total trip budget in USD.
+        trip_style: One of the allowed trip styles (e.g. "budget", "comfort").
+
+    Returns:
+        A formatted prompt string instructing the LLM to respond with a JSON
+        object matching the expected itinerary structure.
+    """
     style_desc = _STYLE_DESCRIPTIONS.get(trip_style.lower(), trip_style)
     return f"""Plan a {days}-day trip to {destination}.
 
@@ -55,7 +81,31 @@ Respond with ONLY a JSON object in this exact format — no extra text before or
 }}"""
 
 
-async def generate_itinerary(destination: str, days: int, budget: float, trip_style: str) -> list[dict]:
+async def generate_itinerary(
+    destination: str,
+    days: int,
+    budget: float,
+    trip_style: str,
+) -> LLMItineraryOutput:
+    """Generate a day-by-day travel itinerary using the Anthropic Claude LLM.
+
+    Builds a structured prompt from the trip details, calls the Claude API,
+    strips any markdown formatting from the response, parses the JSON, and
+    validates it against LLMItineraryOutput before returning.
+
+    Args:
+        destination: The travel destination (e.g. "Paris").
+        days: Number of days the trip lasts.
+        budget: Total trip budget in USD.
+        trip_style: One of the allowed trip styles (e.g. "budget", "comfort").
+
+    Returns:
+        A validated LLMItineraryOutput instance containing the structured itinerary.
+
+    Raises:
+        HTTPException(500): If the API call fails, the response is not valid JSON,
+            or the JSON does not match the expected itinerary structure.
+    """
     try:
         response = await _client.messages.create(
             model=MODEL,
@@ -83,10 +133,13 @@ async def generate_itinerary(destination: str, days: int, budget: float, trip_st
     except json.JSONDecodeError:
         raise HTTPException(status_code=500, detail="LLM returned invalid JSON format")
 
-    if "days" not in parsed:
-        raise HTTPException(status_code=500, detail="LLM response missing required itinerary structure")
-
-    return parsed["days"]
+    try:
+        return LLMItineraryOutput(**parsed)
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"LLM response did not match the expected itinerary structure: {str(e)}",
+        )
 
 
 if __name__ == "__main__":
