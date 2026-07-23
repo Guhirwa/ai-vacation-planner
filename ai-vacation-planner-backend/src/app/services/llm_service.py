@@ -11,11 +11,14 @@ against LLMItineraryOutput before being returned to the caller.
 """
 
 import json
+import logging
 from anthropic import AsyncAnthropic, APIConnectionError, APIStatusError
 from fastapi import HTTPException
 from pydantic import ValidationError
 from app.config import settings
 from app.schemas.itinerary import LLMItineraryOutput
+
+logger = logging.getLogger(__name__)
 
 _client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
@@ -81,6 +84,71 @@ Respond with ONLY a JSON object in this exact format — no extra text before or
 }}"""
 
 
+async def _call_llm_with_retry(
+    destination: str,
+    days: int,
+    budget: float,
+    trip_style: str,
+) -> LLMItineraryOutput:
+    """Attempt to generate a structured itinerary from the LLM, retrying on
+    recoverable parsing and validation failures up to settings.llm_max_retries times.
+
+    Args:
+        destination: The travel destination.
+        days: Number of days the trip lasts.
+        budget: Total trip budget in USD.
+        trip_style: One of the allowed trip styles.
+
+    Returns:
+        A validated LLMItineraryOutput instance.
+
+    Raises:
+        HTTPException(500): If all retry attempts are exhausted or a
+            non-recoverable API error occurs.
+    """
+    last_error: Exception | None = None
+
+    for attempt in range(1, settings.llm_max_retries + 1):
+        try:
+            response = await _client.messages.create(
+                model=MODEL,
+                max_tokens=4096,
+                system=SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": _build_user_prompt(destination, days, budget, trip_style)}],
+            )
+        except APIStatusError:
+            raise HTTPException(status_code=500, detail="AI itinerary generation is temporarily unavailable")
+        except APIConnectionError:
+            raise HTTPException(status_code=500, detail="Could not reach the AI itinerary generation service")
+        except Exception:
+            raise HTTPException(status_code=500, detail="AI itinerary generation failed unexpectedly")
+
+        raw = response.content[0].text.strip()
+
+        # Strip accidental markdown code fences (```json ... ``` or ``` ... ```)
+        if raw.startswith("```"):
+            lines = raw.splitlines()
+            inner = lines[1:-1] if lines[-1].strip() == "```" else lines[1:]
+            raw = "\n".join(inner).strip()
+
+        try:
+            parsed = json.loads(raw)
+            return LLMItineraryOutput(**parsed)
+        except (json.JSONDecodeError, ValidationError) as e:
+            last_error = e
+            logger.warning(
+                "LLM itinerary generation attempt %d/%d failed: %s",
+                attempt,
+                settings.llm_max_retries,
+                e,
+            )
+
+    raise HTTPException(
+        status_code=500,
+        detail=f"AI itinerary generation failed after {settings.llm_max_retries} attempts: {last_error}",
+    )
+
+
 async def generate_itinerary(
     destination: str,
     days: int,
@@ -89,9 +157,10 @@ async def generate_itinerary(
 ) -> LLMItineraryOutput:
     """Generate a day-by-day travel itinerary using the Anthropic Claude LLM.
 
-    Builds a structured prompt from the trip details, calls the Claude API,
-    strips any markdown formatting from the response, parses the JSON, and
-    validates it against LLMItineraryOutput before returning.
+    Public entry point for itinerary generation. Delegates to
+    _call_llm_with_retry, which builds the prompt, calls the Claude API, and
+    validates the response, retrying on recoverable JSON/validation failures
+    up to settings.llm_max_retries times.
 
     Args:
         destination: The travel destination (e.g. "Paris").
@@ -103,43 +172,10 @@ async def generate_itinerary(
         A validated LLMItineraryOutput instance containing the structured itinerary.
 
     Raises:
-        HTTPException(500): If the API call fails, the response is not valid JSON,
-            or the JSON does not match the expected itinerary structure.
+        HTTPException(500): If a non-recoverable API error occurs, or if all
+            retry attempts are exhausted.
     """
-    try:
-        response = await _client.messages.create(
-            model=MODEL,
-            max_tokens=4096,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": _build_user_prompt(destination, days, budget, trip_style)}],
-        )
-    except APIStatusError:
-        raise HTTPException(status_code=500, detail="AI itinerary generation is temporarily unavailable")
-    except APIConnectionError:
-        raise HTTPException(status_code=500, detail="Could not reach the AI itinerary generation service")
-    except Exception:
-        raise HTTPException(status_code=500, detail="AI itinerary generation failed unexpectedly")
-
-    raw = response.content[0].text.strip()
-
-    # Strip accidental markdown code fences (```json ... ``` or ``` ... ```)
-    if raw.startswith("```"):
-        lines = raw.splitlines()
-        inner = lines[1:-1] if lines[-1].strip() == "```" else lines[1:]
-        raw = "\n".join(inner).strip()
-
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=500, detail="LLM returned invalid JSON format")
-
-    try:
-        return LLMItineraryOutput(**parsed)
-    except ValidationError as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"LLM response did not match the expected itinerary structure: {str(e)}",
-        )
+    return await _call_llm_with_retry(destination, days, budget, trip_style)
 
 
 if __name__ == "__main__":
