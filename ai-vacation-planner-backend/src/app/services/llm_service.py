@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 from app.config import settings
 from app.schemas.itinerary import LLMItineraryOutput
+from app.services.weather_service import get_weather_summary
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,13 @@ _STYLE_DESCRIPTIONS = {
 }
 
 
-def _build_user_prompt(destination: str, days: int, budget: float, trip_style: str) -> str:
+def _build_user_prompt(
+    destination: str,
+    days: int,
+    budget: float,
+    trip_style: str,
+    weather_summary: str | None = None,
+) -> str:
     """Build the user-facing prompt sent to the LLM for itinerary generation.
 
     Args:
@@ -55,23 +62,30 @@ def _build_user_prompt(destination: str, days: int, budget: float, trip_style: s
         days: Number of days the trip lasts.
         budget: Total trip budget in USD.
         trip_style: One of the allowed trip styles (e.g. "budget", "comfort").
+        weather_summary: An optional plain-English weather forecast summary.
+            When provided, it is added as a prompt section so the LLM can
+            favor weather-appropriate activities. Omitted entirely if None.
 
     Returns:
         A formatted prompt string instructing the LLM to respond with a JSON
         object matching the expected itinerary structure.
     """
     style_desc = _STYLE_DESCRIPTIONS.get(trip_style.lower(), trip_style)
+    weather_section = (
+        f"\nWeather forecast:\n- {weather_summary}\n" if weather_summary else ""
+    )
     return f"""Plan a {days}-day trip to {destination}.
 
 Trip details:
 - Total budget: ${budget:,.2f} USD — every suggestion must fit within this budget
 - Travel style: {trip_style} ({style_desc})
 - Days: exactly {days} days, each with between 3 and 5 activities
-
+{weather_section}
 Requirements for each day:
 - Include a mix of sightseeing, food experiences, and local culture
 - Do not repeat the same activity across different days
 - All activities must be real places that physically exist in or immediately around {destination}
+- If a weather forecast is provided above, favor outdoor activities on sunny days and indoor/covered activities on rainy days
 
 Respond with ONLY a JSON object in this exact format — no extra text before or after:
 {{
@@ -89,6 +103,7 @@ async def _call_llm_with_retry(
     days: int,
     budget: float,
     trip_style: str,
+    weather_summary: str | None = None,
 ) -> LLMItineraryOutput:
     """Attempt to generate a structured itinerary from the LLM, retrying on
     recoverable parsing and validation failures up to settings.llm_max_retries times.
@@ -98,6 +113,8 @@ async def _call_llm_with_retry(
         days: Number of days the trip lasts.
         budget: Total trip budget in USD.
         trip_style: One of the allowed trip styles.
+        weather_summary: An optional plain-English weather forecast summary
+            to include in the prompt sent to the LLM.
 
     Returns:
         A validated LLMItineraryOutput instance.
@@ -107,6 +124,8 @@ async def _call_llm_with_retry(
             non-recoverable API error occurs.
     """
     last_error: Exception | None = None
+    user_prompt = _build_user_prompt(destination, days, budget, trip_style, weather_summary)
+    logger.debug("LLM user prompt for %s:\n%s", destination, user_prompt)
 
     for attempt in range(1, settings.llm_max_retries + 1):
         try:
@@ -114,7 +133,7 @@ async def _call_llm_with_retry(
                 model=MODEL,
                 max_tokens=4096,
                 system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": _build_user_prompt(destination, days, budget, trip_style)}],
+                messages=[{"role": "user", "content": user_prompt}],
             )
         except APIStatusError:
             raise HTTPException(status_code=500, detail="AI itinerary generation is temporarily unavailable")
@@ -157,10 +176,11 @@ async def generate_itinerary(
 ) -> LLMItineraryOutput:
     """Generate a day-by-day travel itinerary using the Anthropic Claude LLM.
 
-    Public entry point for itinerary generation. Delegates to
-    _call_llm_with_retry, which builds the prompt, calls the Claude API, and
-    validates the response, retrying on recoverable JSON/validation failures
-    up to settings.llm_max_retries times.
+    Public entry point for itinerary generation. Fetches a weather summary
+    for the destination (best-effort — a weather failure never blocks
+    itinerary generation) and delegates to _call_llm_with_retry, which builds
+    the prompt, calls the Claude API, and validates the response, retrying on
+    recoverable JSON/validation failures up to settings.llm_max_retries times.
 
     Args:
         destination: The travel destination (e.g. "Paris").
@@ -175,7 +195,13 @@ async def generate_itinerary(
         HTTPException(500): If a non-recoverable API error occurs, or if all
             retry attempts are exhausted.
     """
-    return await _call_llm_with_retry(destination, days, budget, trip_style)
+    try:
+        weather_summary = await get_weather_summary(destination)
+    except HTTPException as e:
+        logger.warning("Weather lookup failed for '%s', continuing without weather context: %s", destination, e.detail)
+        weather_summary = None
+
+    return await _call_llm_with_retry(destination, days, budget, trip_style, weather_summary)
 
 
 if __name__ == "__main__":

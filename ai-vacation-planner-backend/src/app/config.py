@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     app_name: str = "AI Vacation Planner APIs"
     api_version: str = "1.0.0"
     llm_max_retries: int = 3
+    weather_api_timeout: int = 10  # seconds before the weather API call times out
 
     class Config:
         env_file = ".env"
