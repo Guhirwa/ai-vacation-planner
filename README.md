@@ -39,6 +39,7 @@ ai-vacation-planner/
 - A `Trip` has one `Itinerary`.
 - An `Itinerary` stores all days as a JSON array (each day has a number and a list of activities).
 - Deleting a `User` cascades to their `Trip`s; deleting a `Trip` cascades to its `Itinerary`.
+- An `Itinerary` is generated either manually (user provides days and activities) or via AI (Claude generates structured output validated against LLMItineraryOutput before saving)
 
 
 ## LLM Integration
@@ -47,17 +48,48 @@ ai-vacation-planner/
 **Trigger:** `POST /itineraries/` with `generate_with_ai: true`
 
 **Flow:**
-1. Route handler fetches the trip from the database
-2. Trip details (`destination`, `days`, `budget`, `trip_style`) are passed to `llm_service.generate_itinerary()`
-3. A system prompt establishes Claude as an expert travel planner with rules for geographic accuracy, budget respect, and JSON-only responses
-4. A user prompt is built with the trip details, activity count requirements (3–5 per day), and mix rules (sightseeing, food, local culture)
-5. Claude responds with a structured JSON object
-6. The response is validated, parsed, saved to the database, and returned to the client
+1. Route handler fetches the trip from the database and verifies ownership
+2. Weather service fetches a 7 day forecast for the destination from Open-Meteo (free, no API key required) and summarises it as a plain English string
+3. Trip details and weather summary are passed to `llm_service.generate_itinerary()`
+4. A system prompt establishes Claude as an expert travel planner with rules for geographic accuracy, budget respect, and JSON-only responses
+5. A user prompt is built with trip details, weather context, activity count requirements (3–5 per day), and mix rules (sightseeing, food, local culture)
+6. Claude (`claude-haiku-4-5`) responds with a structured JSON object
+7. The response is validated against `LLMItineraryOutput` (Pydantic), retried up to `LLM_MAX_RETRIES` times on recoverable failures (invalid JSON, schema mismatch)
+8. The validated itinerary is saved to the database and returned to the client
 
 **Error handling:**
 - If the LLM returns invalid JSON → 500: `"LLM returned invalid JSON format"`
 - If the response is missing the `days` key → 500: `"LLM response missing required itinerary structure"`
 - If the Anthropic API call fails → 500 with the error detail
+- If the weather API is unreachable → generation continues without weather context (non blocking)
+- If all retry attempts are exhausted → 500: `"AI itinerary generation failed after {n} attempts"`
+
+
+## Structured Output & Weather Tool
+
+### Structured Output
+LLM responses are now validated against strict Pydantic models before being saved:
+- `LLMDayOutput`: enforces day >= 1, between 3 and 5 non-empty activities per day
+- `LLMItineraryOutput`: enforces sequential day numbering with no gaps or duplicates
+- Malformed responses raise a clean 500 error instead of saving broken data
+
+### Retry Logic
+Failed LLM calls are retried automatically:
+- Recoverable failures (invalid JSON, schema mismatch): retried up to `LLM_MAX_RETRIES` times (default 3)
+- Non-recoverable failures (billing, network): fail immediately with a clean error
+
+### Weather Tool
+Real-time weather is fetched before each AI generation:
+- Uses the Open-Meteo API (free, no API key required)
+- Fetches a 7-day forecast and summarises highs, lows, and precipitation
+- Injected into the prompt so Claude can suggest weather-appropriate activities
+- Non-blocking: if the weather API fails, generation continues without weather context
+
+### New Environment Variables
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `LLM_MAX_RETRIES` | No | `3` | Number of retry attempts for recoverable LLM failures |
+| `WEATHER_API_TIMEOUT` | No | `10` | Timeout in seconds for Open-Meteo API calls |
 
 
 ## Requirements
