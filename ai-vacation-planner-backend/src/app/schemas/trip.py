@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
-ALLOWED_TRIP_STYLES = ["budget", "luxury", "family", "adventure", "romantic", "business"]
+ALLOWED_TRIP_STYLES = ["budget", "comfort", "luxury", "family", "adventure", "romantic", "business"]
 
 def _validate_trip_style(value: Optional[str]) -> Optional[str]:
     if value is None:
