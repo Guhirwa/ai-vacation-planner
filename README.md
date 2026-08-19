@@ -203,7 +203,7 @@ curl -X POST http://localhost:8000/trips/ \
   -d '{"destination": "Paris", "days": 5, "budget": 1500.0, "trip_style": "budget"}'
 ```
 
-**Allowed `trip_style` values:** `budget`, `luxury`, `family`, `adventure`, `romantic`, `business`
+**Allowed `trip_style` values:** `budget`, `comfort`, `luxury`, `family`, `adventure`, `romantic`, `business`
 
 ### Itineraries
 

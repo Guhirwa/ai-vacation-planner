@@ -4,7 +4,7 @@ from typing import List
 from app.database import get_database
 from app.dependencies.auth import get_current_user
 from app.models import User, Trip
-from app.schemas.trip import TripResponse, TripCreate, TripUpdate
+from app.schemas.trip import TripResponse, TripCreate, TripUpdate, MessageResponse
 
 router = APIRouter(prefix="/trips", tags=["Trips"])
 
@@ -15,7 +15,17 @@ def create_trip(
     trip: TripCreate,
     database: Session = Depends(get_database),
     current_user: User = Depends(get_current_user),
-):
+) -> TripResponse:
+    """Create a new trip owned by the current user.
+
+    Args:
+        trip: The trip creation payload.
+        database: The database session dependency.
+        current_user: The authenticated user, injected via dependency.
+
+    Returns:
+        The created trip as a TripResponse.
+    """
     new_trip = Trip(
         destination=trip.destination,
         days=trip.days,
@@ -35,6 +45,7 @@ def create_trip(
         user_id=new_trip.user_id,
         created_at=new_trip.created_at,
         updated_at=new_trip.created_at,
+        message="Trip created successfully",
     )
 
 
@@ -64,13 +75,28 @@ def get_trip(
     return trip
 
 
-@router.put("/{trip_id}")
+@router.put("/{trip_id}", response_model=TripResponse)
 def update_trip(
     trip_id: int,
     trip_update: TripUpdate,
     database: Session = Depends(get_database),
-    current_user=Depends(get_current_user),
-):
+    current_user: User = Depends(get_current_user),
+) -> Trip:
+    """Update fields on an existing trip owned by the current user.
+
+    Args:
+        trip_id: The ID of the trip to update.
+        trip_update: The fields to update; unset fields are left unchanged.
+        database: The database session dependency.
+        current_user: The authenticated user, injected via dependency.
+
+    Returns:
+        The updated trip, serialized as a TripResponse.
+
+    Raises:
+        HTTPException(404): If the trip does not exist or does not belong
+            to the current user.
+    """
     trip = (
         database.query(Trip)
         .filter(Trip.id == trip_id, Trip.user_id == current_user.id)
@@ -78,19 +104,34 @@ def update_trip(
     )
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
-    update_data = trip_update.dict(exclude_unset=True)
+    update_data = trip_update.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(trip, key, value)
     database.commit()
-    return {"message": "Trip updated successfully"}
+    database.refresh(trip)
+    return trip
 
 
-@router.delete("/{trip_id}")
+@router.delete("/{trip_id}", response_model=MessageResponse)
 def delete_trip(
     trip_id: int,
     database: Session = Depends(get_database),
     current_user: User = Depends(get_current_user),
-):
+) -> MessageResponse:
+    """Delete a trip owned by the current user.
+
+    Args:
+        trip_id: The ID of the trip to delete.
+        database: The database session dependency.
+        current_user: The authenticated user, injected via dependency.
+
+    Returns:
+        A confirmation message.
+
+    Raises:
+        HTTPException(404): If the trip does not exist or does not belong
+            to the current user.
+    """
     trip = (
         database.query(Trip)
         .filter(Trip.id == trip_id, Trip.user_id == current_user.id)
@@ -100,4 +141,4 @@ def delete_trip(
         raise HTTPException(status_code=404, detail="Trip not found")
     database.delete(trip)
     database.commit()
-    return {"message": "Trip deleted successfully"}
+    return MessageResponse(message="Trip deleted successfully")

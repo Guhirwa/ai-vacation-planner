@@ -202,9 +202,3 @@ async def generate_itinerary(
         weather_summary = None
 
     return await _call_llm_with_retry(destination, days, budget, trip_style, weather_summary)
-
-
-if __name__ == "__main__":
-    import asyncio
-    result = asyncio.run(generate_itinerary("Paris", 2, 1500, "budget"))
-    print(result)

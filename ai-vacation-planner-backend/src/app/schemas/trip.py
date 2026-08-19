@@ -29,10 +29,14 @@ class TripResponse(TripCreate):
     user_id: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    message: str = "Trip created successfully"
+    message: str = ""
 
     class Config:
         from_attributes = True
+
+class MessageResponse(BaseModel):
+    """Generic response schema for operations that return only a status message."""
+    message: str
 
 class TripUpdate(BaseModel):
     destination: Optional[str] = None
