@@ -1,8 +1,14 @@
+"""Application entry point: creates the FastAPI app, configures logging, and registers routers."""
+
+import logging
+
 from fastapi import FastAPI
 from app.routers import auth, trips, itineraries
 from app.routers.auth import user_router
 from app.database import engine, Base
 from app.config import settings
+
+logging.getLogger("app").setLevel(logging.DEBUG)
 
 Base.metadata.create_all(bind=engine)
 
