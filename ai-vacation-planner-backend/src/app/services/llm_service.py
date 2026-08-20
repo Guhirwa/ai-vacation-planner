@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 from app.config import settings
 from app.schemas.itinerary import LLMItineraryOutput
+from app.services.knowledge_service import search_knowledge
 from app.services.weather_service import get_weather_summary
 
 logger = logging.getLogger(__name__)
@@ -54,25 +55,30 @@ def _build_user_prompt(
     budget: float,
     trip_style: str,
     weather_summary: str | None = None,
+    knowledge_context: str | None = None,
 ) -> str:
-    """Build the user-facing prompt sent to the LLM for itinerary generation.
+    """Build the user prompt for itinerary generation.
 
     Args:
-        destination: The travel destination (e.g. "Paris").
+        destination: The travel destination.
         days: Number of days the trip lasts.
         budget: Total trip budget in USD.
-        trip_style: One of the allowed trip styles (e.g. "budget", "comfort").
-        weather_summary: An optional plain-English weather forecast summary.
-            When provided, it is added as a prompt section so the LLM can
-            favor weather-appropriate activities. Omitted entirely if None.
+        trip_style: One of the allowed trip styles.
+        weather_summary: Optional plain-English weather forecast to inject.
+        knowledge_context: Optional retrieved knowledge base context to inject.
 
     Returns:
-        A formatted prompt string instructing the LLM to respond with a JSON
-        object matching the expected itinerary structure.
+        The fully constructed user prompt string.
     """
     style_desc = _STYLE_DESCRIPTIONS.get(trip_style.lower(), trip_style)
     weather_section = (
         f"\nWeather forecast:\n- {weather_summary}\n" if weather_summary else ""
+    )
+    knowledge_section = (
+        f"\nLocal knowledge base context (use this to suggest authentic, "
+        f"lesser-known places alongside the well-known ones):\n{knowledge_context}\n"
+        if knowledge_context
+        else ""
     )
     return f"""Plan a {days}-day trip to {destination}.
 
@@ -80,7 +86,7 @@ Trip details:
 - Total budget: ${budget:,.2f} USD — every suggestion must fit within this budget
 - Travel style: {trip_style} ({style_desc})
 - Days: exactly {days} days, each with between 3 and 5 activities
-{weather_section}
+{weather_section}{knowledge_section}
 Requirements for each day:
 - Include a mix of sightseeing, food experiences, and local culture
 - Do not repeat the same activity across different days
@@ -104,6 +110,7 @@ async def _call_llm_with_retry(
     budget: float,
     trip_style: str,
     weather_summary: str | None = None,
+    knowledge_context: str | None = None,
 ) -> LLMItineraryOutput:
     """Attempt to generate a structured itinerary from the LLM, retrying on
     recoverable parsing and validation failures up to settings.llm_max_retries times.
@@ -115,6 +122,8 @@ async def _call_llm_with_retry(
         trip_style: One of the allowed trip styles.
         weather_summary: An optional plain-English weather forecast summary
             to include in the prompt sent to the LLM.
+        knowledge_context: An optional retrieved knowledge base context to
+            include in the prompt sent to the LLM.
 
     Returns:
         A validated LLMItineraryOutput instance.
@@ -124,7 +133,9 @@ async def _call_llm_with_retry(
             non-recoverable API error occurs.
     """
     last_error: Exception | None = None
-    user_prompt = _build_user_prompt(destination, days, budget, trip_style, weather_summary)
+    user_prompt = _build_user_prompt(
+        destination, days, budget, trip_style, weather_summary, knowledge_context
+    )
     logger.debug("LLM user prompt for %s:\n%s", destination, user_prompt)
 
     for attempt in range(1, settings.llm_max_retries + 1):
@@ -177,10 +188,11 @@ async def generate_itinerary(
     """Generate a day-by-day travel itinerary using the Anthropic Claude LLM.
 
     Public entry point for itinerary generation. Fetches a weather summary
-    for the destination (best-effort — a weather failure never blocks
-    itinerary generation) and delegates to _call_llm_with_retry, which builds
-    the prompt, calls the Claude API, and validates the response, retrying on
-    recoverable JSON/validation failures up to settings.llm_max_retries times.
+    and retrieves relevant knowledge base context for the destination (both
+    best-effort — a failure in either never blocks itinerary generation),
+    then delegates to _call_llm_with_retry, which builds the prompt, calls
+    the Claude API, and validates the response, retrying on recoverable
+    JSON/validation failures up to settings.llm_max_retries times.
 
     Args:
         destination: The travel destination (e.g. "Paris").
@@ -201,4 +213,18 @@ async def generate_itinerary(
         logger.warning("Weather lookup failed for '%s', continuing without weather context: %s", destination, e.detail)
         weather_summary = None
 
-    return await _call_llm_with_retry(destination, days, budget, trip_style, weather_summary)
+    try:
+        knowledge_context = await search_knowledge(destination)
+    except Exception as e:
+        logger.warning("Knowledge retrieval failed for '%s', continuing without knowledge context: %s", destination, e)
+        knowledge_context = None
+
+    if knowledge_context:
+        logger.warning("Retrieved knowledge base context for '%s'", destination)
+    else:
+        logger.warning("No knowledge base context found for '%s', continuing without it", destination)
+        knowledge_context = None
+
+    return await _call_llm_with_retry(
+        destination, days, budget, trip_style, weather_summary, knowledge_context
+    )

@@ -25,8 +25,6 @@ class KnowledgeAddResponse(BaseModel):
 
 class KnowledgeSearchResponse(BaseModel):
     """Response schema for a knowledge base search query."""
-
     destination: str
-    
     query: str | None = None
     results: str
