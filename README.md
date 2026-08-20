@@ -40,6 +40,7 @@ ai-vacation-planner/
 - An `Itinerary` stores all days as a JSON array (each day has a number and a list of activities).
 - Deleting a `User` cascades to their `Trip`s; deleting a `Trip` cascades to its `Itinerary`.
 - An `Itinerary` is generated either manually (user provides days and activities) or via AI (Claude generates structured output validated against LLMItineraryOutput before saving)
+- The knowledge base is stored in ChromaDB (a persistent vector database) as embedded text chunks, searchable by destination via semantic similarity
 
 
 ## LLM Integration
@@ -50,18 +51,20 @@ ai-vacation-planner/
 **Flow:**
 1. Route handler fetches the trip from the database and verifies ownership
 2. Weather service fetches a 7 day forecast for the destination from Open-Meteo (free, no API key required) and summarises it as a plain English string
-3. Trip details and weather summary are passed to `llm_service.generate_itinerary()`
-4. A system prompt establishes Claude as an expert travel planner with rules for geographic accuracy, budget respect, and JSON-only responses
-5. A user prompt is built with trip details, weather context, activity count requirements (3–5 per day), and mix rules (sightseeing, food, local culture)
-6. Claude (`claude-haiku-4-5`) responds with a structured JSON object
-7. The response is validated against `LLMItineraryOutput` (Pydantic), retried up to `LLM_MAX_RETRIES` times on recoverable failures (invalid JSON, schema mismatch)
-8. The validated itinerary is saved to the database and returned to the client
+3. Knowledge service searches ChromaDB for relevant travel tips and guides for the destination using semantic search
+4. Trip details, weather summary, and knowledge context are passed to `llm_service.generate_itinerary()`
+5. A system prompt establishes Claude as an expert travel planner with rules for geographic accuracy, budget respect, and JSON-only responses
+6. A user prompt is built with trip details, weather context, knowledge context, activity count requirements (3–5 per day), and mix rules (sightseeing, food, local culture)
+7. Claude (`claude-haiku-4-5`) responds with a structured JSON object
+8. The response is validated against `LLMItineraryOutput` (Pydantic), retried up to `LLM_MAX_RETRIES` times on recoverable failures
+9. The validated itinerary is saved to the database and returned to the client
 
 **Error handling:**
 - If the LLM returns invalid JSON → 500: `"LLM returned invalid JSON format"`
 - If the response is missing the `days` key → 500: `"LLM response missing required itinerary structure"`
 - If the Anthropic API call fails → 500 with the error detail
 - If the weather API is unreachable → generation continues without weather context (non blocking)
+- If the knowledge base returns no results for the destination → generation continues without knowledge context (non-blocking)
 - If all retry attempts are exhausted → 500: `"AI itinerary generation failed after {n} attempts"`
 
 
@@ -90,6 +93,54 @@ Real-time weather is fetched before each AI generation:
 |---|---|---|---|
 | `LLM_MAX_RETRIES` | No | `3` | Number of retry attempts for recoverable LLM failures |
 | `WEATHER_API_TIMEOUT` | No | `10` | Timeout in seconds for Open-Meteo API calls |
+
+
+## Phase 4 — RAG & Knowledge Systems
+
+### Travel Knowledge Base
+The backend now maintains a vector knowledge base of travel guides, local tips, hidden gems, and destination notes stored in ChromaDB.
+
+Knowledge is retrieved semantically before each AI generation and injected into the prompt so Claude can reference specific local places and insider tips rather than relying solely on its training data.
+
+### Knowledge Base API
+Two new endpoints manage the knowledge base:
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/knowledge` | Yes | Add a travel document to the knowledge base |
+| `GET` | `/knowledge/search` | Yes | Search the knowledge base by destination |
+
+**Add a document:**
+```bash
+curl -X POST http://localhost:8000/knowledge \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "destination": "Paris",
+    "content": "Your travel guide content here...",
+    "source": "guide"
+  }'
+```
+
+**Search the knowledge base:**
+```bash
+curl "http://localhost:8000/knowledge/search?destination=Paris&query=hidden gems" \
+  -H "Authorization: Bearer <token>"
+```
+
+### Seeding the Knowledge Base
+A seed script is included with travel guides for Paris, Tokyo, Barcelona, New York, and Rome:
+
+```bash
+cd ai-vacation-planner-backend
+python scripts/seed_knowledge.py
+```
+
+### New Environment Variables
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `CHROMA_PERSIST_PATH` | No | `./chroma_db` | Path where ChromaDB stores its data on disk |
+| `KNOWLEDGE_TOP_K` | No | `3` | Number of knowledge chunks to retrieve per query |
 
 
 ## Requirements
@@ -261,6 +312,15 @@ AI mode — let Claude generate the itinerary:
 - `ANTHROPIC_API_KEY` must be set in `.env`
 - The trip must already exist (create it first via `POST /trips/`)
 - The generated itinerary contains 3–5 real activities per day, respecting the trip budget and style
+
+### Knowledge Base
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/knowledge` | Yes | Add a travel document to the knowledge base |
+| `GET` | `/knowledge/search` | Yes | Search the knowledge base by destination and query |
+
+See [Phase 4 — RAG & Knowledge Systems](#phase-4--rag--knowledge-systems) above for details and examples.
 
 ---
 
