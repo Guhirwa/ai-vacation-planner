@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     api_version: str = "1.0.0"
     llm_max_retries: int = 3
     weather_api_timeout: int = 10  # seconds before the weather API call times out
+    chroma_persist_path: str = "./chroma_db"
+    knowledge_top_k: int = 3
 
     class Config:
         env_file = ".env"
