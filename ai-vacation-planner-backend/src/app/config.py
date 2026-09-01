@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     chroma_persist_path: str = "./chroma_db"
     knowledge_top_k: int = 3
 
+    agent_model: str = "claude-haiku-4-5"
+    """The model the LangGraph agent uses for reasoning and tool calls."""
+
+    agent_max_iterations: int = 10
+    """Maximum number of tool-call cycles the agent may run before it must stop."""
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
