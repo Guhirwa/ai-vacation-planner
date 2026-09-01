@@ -4,7 +4,14 @@ knowledge_service.py
 Handles ingestion and retrieval of travel knowledge documents.
 Documents are chunked, embedded using a local sentence-transformers model,
 and stored in ChromaDB for semantic search during itinerary generation.
+
+This service expects plain text content. Extracting plain text from other
+formats (HTML, PDF, DOCX, etc.) is the responsibility of whatever ingests
+those sources — this module only normalises whitespace, it does not parse
+markup or binary formats.
 """
+
+import re
 
 from sentence_transformers import SentenceTransformer
 from app.vector_db import get_knowledge_collection
@@ -17,6 +24,11 @@ _embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
     """Split a long text into overlapping chunks for embedding.
 
+    Runs of whitespace (repeated spaces, tabs, blank lines) are collapsed to
+    a single space before splitting, so messy plain text — e.g. from a
+    naive HTML strip or a PDF-to-text conversion — doesn't waste chunk
+    budget on formatting noise or degrade the resulting embeddings.
+
     Args:
         text: The raw text to split.
         chunk_size: Maximum number of characters per chunk.
@@ -26,11 +38,13 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]
     Returns:
         A list of text chunks.
     """
+    normalized = re.sub(r"\s+", " ", text).strip()
+
     chunks: list[str] = []
     step = chunk_size - overlap
     start = 0
-    while start < len(text):
-        chunk = text[start : start + chunk_size].strip()
+    while start < len(normalized):
+        chunk = normalized[start : start + chunk_size].strip()
         if chunk:
             chunks.append(chunk)
         start += step
