@@ -220,9 +220,9 @@ async def generate_itinerary(
         knowledge_context = None
 
     if knowledge_context:
-        logger.warning("Retrieved knowledge base context for '%s'", destination)
+        logger.info("Retrieved knowledge base context for '%s'", destination)
     else:
-        logger.warning("No knowledge base context found for '%s', continuing without it", destination)
+        logger.info("No knowledge base context found for '%s', continuing without it", destination)
         knowledge_context = None
 
     return await _call_llm_with_retry(
