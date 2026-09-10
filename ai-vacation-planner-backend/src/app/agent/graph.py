@@ -21,6 +21,7 @@ from typing import Annotated, TypedDict
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
 from pydantic import ValidationError
@@ -30,7 +31,6 @@ from app.config import settings
 from app.schemas.itinerary import LLMItineraryOutput
 
 logger = logging.getLogger(__name__)
-
 
 class AgentState(TypedDict):
     """Represents the full message history passed between graph nodes.
@@ -42,7 +42,6 @@ class AgentState(TypedDict):
                   rather than replaces the list.
     """
     messages: Annotated[list[AnyMessage], operator.add]
-
 
 AGENT_SYSTEM_PROMPT = """You are an expert travel planning assistant with access to tools.
 
@@ -170,13 +169,27 @@ async def run_agent(request: str, max_validation_retries: int = 3) -> dict:
 
     Raises:
         ValueError: If the agent fails to return a valid itinerary
-                    after all retry attempts are exhausted.
+                    after all retry attempts are exhausted, or if it
+                    exceeds the configured tool-call cycle limit.
     """
     graph = _build_graph()
     messages = [HumanMessage(content=request)]
 
+    # Each tool-call cycle is one llm step plus one tools step, plus one
+    # final llm step to produce the answer with no further tool calls.
+    recursion_limit = (settings.agent_max_iterations * 2) + 1
+
     for attempt in range(1, max_validation_retries + 1):
-        result = await graph.ainvoke({"messages": messages})
+        try:
+            result = await graph.ainvoke(
+                {"messages": messages},
+                config={"recursion_limit": recursion_limit},
+            )
+        except GraphRecursionError as e:
+            raise ValueError(
+                f"Agent exceeded the maximum of {settings.agent_max_iterations} "
+                "tool-call cycles without producing a final answer"
+            ) from e
         messages = result["messages"]
         raw = messages[-1].content
 
