@@ -100,6 +100,9 @@ async def call_llm(state: AgentState) -> dict:
     response = await llm.ainvoke(messages)
     tool_call_count = len(response.tool_calls) if hasattr(response, "tool_calls") else 0
     logger.info("LLM responded with %d tool call(s)", tool_call_count)
+    if tool_call_count > 0:
+        tool_names = [tc["name"] for tc in response.tool_calls]
+        logger.info("Tools requested: %s", ", ".join(tool_names))
     return {"messages": [response]}
 
 
