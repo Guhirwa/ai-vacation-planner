@@ -41,6 +41,7 @@ ai-vacation-planner/
 - Deleting a `User` cascades to their `Trip`s; deleting a `Trip` cascades to its `Itinerary`.
 - An `Itinerary` is generated either manually (user provides days and activities) or via AI (Claude generates structured output validated against LLMItineraryOutput before saving)
 - The knowledge base is stored in ChromaDB (a persistent vector database) as embedded text chunks, searchable by destination via semantic similarity
+- An AI agent powered by LangChain and LangGraph orchestrates tool calls at runtime, deciding which tools to invoke (weather, knowledge, place lookup) before combining the results into a final itinerary
 
 
 ## LLM Integration
@@ -50,22 +51,20 @@ ai-vacation-planner/
 
 **Flow:**
 1. Route handler fetches the trip from the database and verifies ownership
-2. Weather service fetches a 7 day forecast for the destination from Open-Meteo (free, no API key required) and summarises it as a plain English string
-3. Knowledge service searches ChromaDB for relevant travel tips and guides for the destination using semantic search
-4. Trip details, weather summary, and knowledge context are passed to `llm_service.generate_itinerary()`
-5. A system prompt establishes Claude as an expert travel planner with rules for geographic accuracy, budget respect, and JSON-only responses
-6. A user prompt is built with trip details, weather context, knowledge context, activity count requirements (3–5 per day), and mix rules (sightseeing, food, local culture)
-7. Claude (`claude-haiku-4-5`) responds with a structured JSON object
-8. The response is validated against `LLMItineraryOutput` (Pydantic), retried up to `LLM_MAX_RETRIES` times on recoverable failures
+2. The agent receives a plain-text request describing the trip details
+3. The agent calls get_trip_details to retrieve full trip information from the database
+4. The agent calls get_weather to fetch a 7-day weather forecast for the destination
+5. The agent calls search_travel_knowledge to retrieve local tips and hidden gems from the knowledge base
+6. The agent optionally calls get_place_info to find specific points of interest
+7. The LLM combines all tool results and generates a structured JSON itinerary
+8. The response is validated against LLMItineraryOutput, if validation fails the error is fed back to the agent for self-correction, up to 3 attempts
 9. The validated itinerary is saved to the database and returned to the client
 
 **Error handling:**
-- If the LLM returns invalid JSON → 500: `"LLM returned invalid JSON format"`
-- If the response is missing the `days` key → 500: `"LLM response missing required itinerary structure"`
-- If the Anthropic API call fails → 500 with the error detail
-- If the weather API is unreachable → generation continues without weather context (non blocking)
-- If the knowledge base returns no results for the destination → generation continues without knowledge context (non-blocking)
-- If all retry attempts are exhausted → 500: `"AI itinerary generation failed after {n} attempts"`
+- If a tool call fails (weather, knowledge, place lookup) → the agent continues without that context
+- If the agent response fails validation → the error is fed back to the agent for self-correction
+- If all retry attempts are exhausted → 500: "Agent failed to generate itinerary after N attempts"
+- If a non-recoverable API error occurs → 500 with a clean error message
 
 
 ## Structured Output & Weather Tool
@@ -141,6 +140,36 @@ python scripts/seed_knowledge.py
 |---|---|---|---|
 | `CHROMA_PERSIST_PATH` | No | `./chroma_db` | Path where ChromaDB stores its data on disk |
 | `KNOWLEDGE_TOP_K` | No | `3` | Number of knowledge chunks to retrieve per query |
+
+
+## Agent & Tool Orchestration
+
+### How the Agent Works
+The itinerary generation pipeline is now powered by a LangGraph ReAct agent that decides at runtime which tools to call based on the trip request, rather than following a fixed sequence.
+
+The agent loop:
+1. Receives the trip request as a plain-text message
+2. Decides which tools to call and in what order
+3. Executes the tools and receives their results
+4. Loops until it has enough information to write the final itinerary
+5. Validates its own output and self-corrects if the structure is wrong
+
+### Available Tools
+| Tool | Description |
+|---|---|
+| `get_trip_details` | Fetches full trip information from the database by trip ID |
+| `get_weather` | Gets a 7-day weather forecast from Open-Meteo for the destination |
+| `search_travel_knowledge` | Searches the ChromaDB knowledge base for local tips and hidden gems |
+| `get_place_info` | Looks up points of interest at the destination using Nominatim |
+
+### Validation and Self-Correction
+After the agent produces a final response it is validated against the same LLMItineraryOutput Pydantic schema used previously, enforcing sequential day numbering and 3–5 non-empty activities per day. If validation fails the exact error is fed back to the agent as a follow-up message so it can correct its own output, up to 3 attempts before the request fails with a clean 500 error.
+
+### New Environment Variables
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `AGENT_MODEL` | No | `claude-haiku-4-5` | The Claude model the agent uses for tool-calling and generation |
+| `AGENT_MAX_ITERATIONS` | No | `10` | Maximum number of tool-call cycles before the agent stops |
 
 
 ## Requirements
@@ -262,6 +291,8 @@ curl -X POST http://localhost:8000/trips/ \
 |---|---|---|
 | `POST` | `/itineraries/` | Create an itinerary for a trip |
 | `GET` | `/itineraries/{trip_id}` | Get the itinerary for a trip |
+
+- When `generate_with_ai: true` the request is handled by the LangGraph agent instead of the fixed LLM pipeline
 
 Each trip can have only one itinerary. The itinerary is made up of days, each with a list of activities.
 
