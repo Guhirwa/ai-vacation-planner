@@ -3,12 +3,17 @@
 import logging
 
 from fastapi import FastAPI
-from app.routers import auth, trips, itineraries
+from app.routers import auth, trips, itineraries, knowledge
 from app.routers.auth import user_router
 from app.database import engine, Base
 from app.config import settings
 
-logging.getLogger("app").setLevel(logging.DEBUG)
+_app_log_handler = logging.StreamHandler()
+_app_log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+
+_app_logger = logging.getLogger("app")
+_app_logger.setLevel(logging.DEBUG)
+_app_logger.addHandler(_app_log_handler)
 
 Base.metadata.create_all(bind=engine)
 
@@ -23,6 +28,7 @@ app.include_router(auth.router)
 app.include_router(user_router)
 app.include_router(trips.router)
 app.include_router(itineraries.router)
+app.include_router(knowledge.router)
 
 @app.get("/")
 def root():
