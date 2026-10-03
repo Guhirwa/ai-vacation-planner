@@ -12,7 +12,7 @@ to call, so descriptions must be specific and action-oriented.
 import httpx
 from fastapi import HTTPException
 from langchain_core.tools import tool
-from app.services.weather_service import get_weather_summary, get_coordinates
+from app.services.weather_service import get_weather_summary
 from app.services.knowledge_service import search_knowledge
 from app.database import session_factory
 from app.models.trip import Trip
@@ -114,8 +114,7 @@ async def get_place_info(destination: str, place_type: str) -> str:
         message if none were found.
     """
     try:
-        await get_coordinates(destination)
-
+        # Nominatim is a text-based search, so no coordinates are needed here
         params = {"q": f"{place_type} in {destination}", "format": "json", "limit": 5}
         headers = {"User-Agent": "ai-vacation-planner/1.0"}
 
