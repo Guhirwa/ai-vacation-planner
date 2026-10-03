@@ -37,3 +37,17 @@ class TranscribeResponse(BaseModel):
     transcript: str
     trip_details: Optional[TripDetailsFromVoice] = None
     message: str
+
+
+class AudioResponse(BaseModel):
+    """Metadata response for the GET /itineraries/{trip_id}/audio endpoint.
+
+    The actual audio is returned as a streaming audio/mpeg response.
+    This schema is used only for error responses and documentation.
+
+    Attributes:
+        trip_id: The ID of the trip the audio was generated for.
+        message: A human-readable status message.
+    """
+    trip_id: int
+    message: str

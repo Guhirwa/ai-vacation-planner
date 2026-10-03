@@ -9,11 +9,13 @@ trip fields. Both operations are independent, a failed extraction does not
 block the transcript from being returned.
 """
 
+import io
 import json
 import logging
 import tempfile
 import os
 from faster_whisper import WhisperModel
+from gtts import gTTS
 from anthropic import AsyncAnthropic
 from fastapi import HTTPException
 
@@ -116,3 +118,69 @@ If any field cannot be determined from the transcript use these defaults:
     except Exception as e:
         logger.warning("Trip detail extraction failed: %s", str(e))
         return None
+
+
+async def synthesize_speech(text: str, language: str = "en") -> bytes:
+    """Convert text to speech audio using gTTS.
+
+    Generates an MP3 audio file in memory from the provided text using
+    Google Text-to-Speech. No API key is required.
+
+    Args:
+        text: The text to convert to speech.
+        language: The language code for speech synthesis. Defaults to "en".
+
+    Returns:
+        The generated audio as raw MP3 bytes.
+
+    Raises:
+        HTTPException(500): If speech synthesis fails for any reason.
+    """
+    try:
+        tts = gTTS(text=text, lang=language, slow=False)
+        audio_buffer = io.BytesIO()
+        tts.write_to_fp(audio_buffer)
+        audio_buffer.seek(0)
+        return audio_buffer.read()
+    except Exception as e:
+        logger.error("Speech synthesis failed: %s", str(e))
+        raise HTTPException(status_code=500, detail="Speech synthesis failed")
+
+
+async def summarize_itinerary_for_speech(itinerary_days: list[dict]) -> str:
+    """Convert a structured itinerary into natural spoken language.
+
+    Takes the list of itinerary days and activities and uses Claude to
+    produce a friendly, conversational summary suitable for text-to-speech
+    output. The summary is shorter and more natural than the raw JSON.
+
+    Args:
+        itinerary_days: A list of dicts, each with a "day" key and an
+                        "activities" key containing a list of strings.
+
+    Returns:
+        A plain-text summary of the itinerary suitable for speech output.
+    """
+    days_text = "\n".join(
+        f"Day {d['day']}: {', '.join(d['activities'])}"
+        for d in itinerary_days
+    )
+    prompt = f"""Convert this travel itinerary into a friendly, conversational spoken summary.
+Write it as if you are a travel assistant reading the plan aloud to the traveller.
+Keep it natural, warm, and concise, no bullet points, no markdown, just flowing sentences.
+
+Itinerary:
+{days_text}
+
+Spoken summary:"""
+
+    try:
+        response = await _anthropic_client.messages.create(
+            model=settings.agent_model,
+            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text.strip()
+    except Exception as e:
+        logger.warning("Itinerary summarization failed, using fallback: %s", str(e))
+        return days_text
