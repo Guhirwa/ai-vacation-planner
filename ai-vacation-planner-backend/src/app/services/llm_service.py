@@ -1,3 +1,9 @@
+# NOTE: This module is intentionally kept as a reference and fallback.
+# The active AI generation pipeline now goes through agent_service.py
+# which uses the LangGraph agent defined in app/agent/graph.py.
+# If the agent ever needs to be bypassed, this direct LLM pipeline
+# can be re-wired by updating the import in routers/itineraries.py.
+
 """LLM-backed itinerary generation service.
 
 Uses the Anthropic Claude API (model: claude-haiku-4-5) to turn a set of
