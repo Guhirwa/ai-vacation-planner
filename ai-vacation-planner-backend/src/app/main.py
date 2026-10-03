@@ -3,7 +3,7 @@
 import logging
 
 from fastapi import FastAPI
-from app.routers import auth, trips, itineraries, knowledge, voice
+from app.routers import auth, trips, itineraries, knowledge, voice, mcp
 from app.routers.auth import user_router
 from app.database import engine, Base
 from app.config import settings
@@ -30,6 +30,7 @@ app.include_router(trips.router)
 app.include_router(itineraries.router)
 app.include_router(knowledge.router)
 app.include_router(voice.router)
+app.include_router(mcp.router)
 
 @app.get("/")
 def root():
