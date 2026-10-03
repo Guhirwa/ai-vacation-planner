@@ -14,7 +14,7 @@ from app.models.trip import Trip
 from app.schemas.itinerary import ItineraryCreate, ItineraryResponse, DayActivity
 from app.dependencies.auth import get_current_user
 from app.models.user import User
-from app.services.llm_service import generate_itinerary
+from app.services.agent_service import generate_itinerary_with_agent
 
 router = APIRouter(prefix="/itineraries", tags=["Itineraries"])
 
@@ -62,10 +62,13 @@ async def create_itinerary(
 
     # Step B: build days list from AI or manual input
     if itinerary.generate_with_ai:
-        result = await generate_itinerary(
-            trip.destination, trip.days, trip.budget, trip.trip_style
+        days_list = await generate_itinerary_with_agent(
+            trip_id=trip.id,
+            destination=trip.destination,
+            days=trip.days,
+            budget=trip.budget,
+            trip_style=trip.trip_style,
         )
-        days_list = [DayActivity(day=d.day, activities=d.activities) for d in result.days]
     else:
         days_list = itinerary.days
 
