@@ -42,6 +42,8 @@ ai-vacation-planner/
 - An `Itinerary` is generated either manually (user provides days and activities) or via AI (Claude generates structured output validated against LLMItineraryOutput before saving)
 - The knowledge base is stored in ChromaDB (a persistent vector database) as embedded text chunks, searchable by destination via semantic similarity
 - An AI agent powered by LangChain and LangGraph orchestrates tool calls at runtime, deciding which tools to invoke (weather, knowledge, place lookup) before combining the results into a final itinerary
+- Voice input is handled by a local Whisper model (faster-whisper) that transcribes audio uploads to text, with Claude extracting structured trip details from the transcript
+- MCP (Model Context Protocol) exposes the travel tools as a standardized server so any MCP-compatible client can call them without depending on internal service implementations
 
 
 ## LLM Integration
@@ -170,6 +172,69 @@ After the agent produces a final response it is validated against the same LLMIt
 |---|---|---|---|
 | `AGENT_MODEL` | No | `claude-haiku-4-5` | The Claude model the agent uses for tool-calling and generation |
 | `AGENT_MAX_ITERATIONS` | No | `10` | Maximum number of tool-call cycles before the agent stops |
+
+
+## Multimodal & MCP
+
+### Voice Input
+The backend accepts audio file uploads and transcribes them to text using a local Whisper model (no API key required). Claude then extracts structured trip details from the transcript so the user can create a trip directly from a voice recording.
+
+**Supported formats:** mp3, wav, m4a, webm, ogg
+
+**Transcribe audio and extract trip details:**
+```bash
+curl -X POST http://localhost:8000/voice/transcribe \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@your_audio.mp3;type=audio/mpeg"
+```
+
+### Voice Output
+Any saved itinerary can be converted to speech. Claude summarizes the itinerary into natural spoken language and gTTS converts it to an MP3 audio file returned as a streaming response.
+
+**Get an itinerary as audio:**
+```bash
+curl -o itinerary.mp3 http://localhost:8000/voice/itineraries/{trip_id}/audio \
+  -H "Authorization: Bearer <token>"
+```
+
+### MCP (Model Context Protocol)
+The travel planning tools are exposed as an MCP server so any MCP-compatible client can call them in a standardized way. The same tools are also accessible via REST endpoints for clients that do not implement the MCP protocol.
+
+**List available tools:**
+```bash
+curl http://localhost:8000/mcp/tools \
+  -H "Authorization: Bearer <token>"
+```
+
+**Call a tool:**
+```bash
+curl -X POST http://localhost:8000/mcp/call \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"tool": "get_weather", "arguments": {"destination": "Paris"}}'
+```
+
+**Available MCP tools:**
+| Tool | Description |
+|---|---|
+| `get_weather` | Fetches a 7-day weather forecast from Open-Meteo |
+| `search_knowledge` | Searches the ChromaDB knowledge base for local tips |
+| `get_place_info` | Finds points of interest using Nominatim |
+
+### New API Endpoints
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/voice/transcribe` | Yes | Transcribe an audio file and extract trip details |
+| `GET` | `/voice/itineraries/{trip_id}/audio` | Yes | Get a saved itinerary as an MP3 audio file |
+| `GET` | `/mcp/tools` | Yes | List all available MCP tools |
+| `POST` | `/mcp/call` | Yes | Call an MCP tool by name |
+
+### New Environment Variables
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `WHISPER_MODEL_SIZE` | No | `base` | Whisper model size: tiny, base, small, medium, large |
+| `WHISPER_DEVICE` | No | `cpu` | Device for Whisper inference: cpu or cuda |
+| `WHISPER_COMPUTE_TYPE` | No | `int8` | Compute type for Whisper: int8 (CPU) or float16 (GPU) |
 
 
 ## Requirements
@@ -352,6 +417,17 @@ AI mode — let Claude generate the itinerary:
 | `GET` | `/knowledge/search` | Yes | Search the knowledge base by destination and query |
 
 See [Phase 4 — RAG & Knowledge Systems](#phase-4--rag--knowledge-systems) above for details and examples.
+
+### Voice & MCP
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/voice/transcribe` | Yes | Transcribe an audio file and extract trip details |
+| `GET` | `/voice/itineraries/{trip_id}/audio` | Yes | Get a saved itinerary as spoken audio |
+| `GET` | `/mcp/tools` | Yes | List all available MCP tools |
+| `POST` | `/mcp/call` | Yes | Call an MCP tool by name |
+
+See [Multimodal & MCP](#multimodal--mcp) above for details and examples.
 
 ---
 
