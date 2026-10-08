@@ -19,16 +19,27 @@ from mcp import types
 
 from app.services.weather_service import get_weather_summary
 from app.services.knowledge_service import search_knowledge
+from app.schemas.mcp import TOOL_ARGUMENT_MODELS
 
 logger = logging.getLogger(__name__)
 
 # Initialize the MCP server with a unique name
 app = Server("travel-planner")
 
+TOOL_DESCRIPTIONS = {
+    "get_weather": "Get the current weather forecast for a travel destination.",
+    "search_knowledge": "Search the travel knowledge base for tips and guides about a destination.",
+    "get_place_info": "Find points of interest of a specific type at a destination.",
+}
+
 
 @app.list_tools()
 async def list_tools() -> list[types.Tool]:
     """Return the list of tools this MCP server exposes.
+
+    Builds each tool's input schema from the same Pydantic argument models
+    the REST endpoint validates against, so both paths agree on what a
+    valid call looks like.
 
     Returns:
         A list of Tool definitions describing the available travel tools,
@@ -36,55 +47,11 @@ async def list_tools() -> list[types.Tool]:
     """
     return [
         types.Tool(
-            name="get_weather",
-            description="Get the current weather forecast for a travel destination.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "destination": {
-                        "type": "string",
-                        "description": "The city or place to get weather for.",
-                    }
-                },
-                "required": ["destination"],
-            },
-        ),
-        types.Tool(
-            name="search_knowledge",
-            description="Search the travel knowledge base for tips and guides about a destination.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "destination": {
-                        "type": "string",
-                        "description": "The destination to search knowledge for.",
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "A specific aspect to search for, e.g. hidden gems, local food.",
-                    },
-                },
-                "required": ["destination", "query"],
-            },
-        ),
-        types.Tool(
-            name="get_place_info",
-            description="Find points of interest of a specific type at a destination.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "destination": {
-                        "type": "string",
-                        "description": "The city or area to search in.",
-                    },
-                    "place_type": {
-                        "type": "string",
-                        "description": "The type of place to find, e.g. museums, restaurants, parks.",
-                    },
-                },
-                "required": ["destination", "place_type"],
-            },
-        ),
+            name=tool_name,
+            description=TOOL_DESCRIPTIONS[tool_name],
+            inputSchema=args_model.model_json_schema(),
+        )
+        for tool_name, args_model in TOOL_ARGUMENT_MODELS.items()
     ]
 
 
