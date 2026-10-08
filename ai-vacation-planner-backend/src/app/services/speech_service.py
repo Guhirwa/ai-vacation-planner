@@ -9,6 +9,7 @@ trip fields. Both operations are independent, a failed extraction does not
 block the transcript from being returned.
 """
 
+import asyncio
 import io
 import json
 import logging
@@ -34,11 +35,31 @@ _whisper_model = WhisperModel(
 )
 
 
+def _run_whisper_transcription(tmp_path: str) -> str:
+    """Run Whisper inference and build the full transcript string.
+
+    This does all of faster-whisper's actual work, including iterating its
+    segment generator, which is where the blocking CPU work actually
+    happens rather than in the initial transcribe() call. Kept as a plain
+    function so it can be run in a worker thread instead of blocking the
+    event loop.
+
+    Args:
+        tmp_path: Path to the temporary audio file to transcribe.
+
+    Returns:
+        The transcribed text as a plain string.
+    """
+    segments, _ = _whisper_model.transcribe(tmp_path, beam_size=5)
+    return " ".join(segment.text.strip() for segment in segments).strip()
+
+
 async def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
     """Transcribe an audio file to text using a local Whisper model.
 
-    Writes the audio bytes to a temporary file, runs Whisper inference,
-    and concatenates all segments into a single transcript string.
+    Writes the audio bytes to a temporary file, then runs Whisper
+    inference in a worker thread so it doesn't block the event loop
+    while other requests are being handled.
     The temporary file is deleted after transcription regardless of outcome.
 
     Args:
@@ -59,9 +80,7 @@ async def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
 
-        segments, _ = _whisper_model.transcribe(tmp_path, beam_size=5)
-        transcript = " ".join(segment.text.strip() for segment in segments)
-        return transcript.strip()
+        return await asyncio.to_thread(_run_whisper_transcription, tmp_path)
     except Exception as e:
         logger.error("Transcription failed: %s", str(e))
         raise HTTPException(status_code=500, detail="Transcription failed")
@@ -120,11 +139,33 @@ If any field cannot be determined from the transcript use these defaults:
         return None
 
 
+def _run_text_to_speech(text: str, language: str) -> bytes:
+    """Generate MP3 audio bytes from text using gTTS.
+
+    gTTS makes a blocking network call during write_to_fp, so this is kept
+    as a plain function to run in a worker thread instead of blocking the
+    event loop.
+
+    Args:
+        text: The text to convert to speech.
+        language: The language code for speech synthesis.
+
+    Returns:
+        The generated audio as raw MP3 bytes.
+    """
+    tts = gTTS(text=text, lang=language, slow=False)
+    audio_buffer = io.BytesIO()
+    tts.write_to_fp(audio_buffer)
+    audio_buffer.seek(0)
+    return audio_buffer.read()
+
+
 async def synthesize_speech(text: str, language: str = "en") -> bytes:
     """Convert text to speech audio using gTTS.
 
     Generates an MP3 audio file in memory from the provided text using
-    Google Text-to-Speech. No API key is required.
+    Google Text-to-Speech, running the actual conversion in a worker
+    thread so it doesn't block the event loop. No API key is required.
 
     Args:
         text: The text to convert to speech.
@@ -137,11 +178,7 @@ async def synthesize_speech(text: str, language: str = "en") -> bytes:
         HTTPException(500): If speech synthesis fails for any reason.
     """
     try:
-        tts = gTTS(text=text, lang=language, slow=False)
-        audio_buffer = io.BytesIO()
-        tts.write_to_fp(audio_buffer)
-        audio_buffer.seek(0)
-        return audio_buffer.read()
+        return await asyncio.to_thread(_run_text_to_speech, text, language)
     except Exception as e:
         logger.error("Speech synthesis failed: %s", str(e))
         raise HTTPException(status_code=500, detail="Speech synthesis failed")
