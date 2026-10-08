@@ -4,12 +4,20 @@ voice.py
 Pydantic schemas for the voice input and output API.
 """
 
-from pydantic import BaseModel
 from typing import Optional
 
+from pydantic import BaseModel
 
-class TripDetailsFromVoice(BaseModel):
+from app.schemas.trip import TripCreate
+
+
+class TripDetailsFromVoice(TripCreate):
     """Trip details extracted from a voice transcript.
+
+    Inherits destination, days, budget, and trip_style straight from
+    TripCreate, so a voice proposal is checked against the exact same
+    rules as a trip the user creates directly, and can't drift out of
+    sync with what /trips/ actually accepts.
 
     Attributes:
         destination: The travel destination extracted from the transcript.
@@ -18,10 +26,6 @@ class TripDetailsFromVoice(BaseModel):
         trip_style: Travel style extracted from the transcript.
         raw_transcript: The original transcript before extraction.
     """
-    destination: str
-    days: int
-    budget: float
-    trip_style: str
     raw_transcript: str
 
 
