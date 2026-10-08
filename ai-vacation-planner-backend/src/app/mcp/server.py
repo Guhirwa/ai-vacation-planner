@@ -96,8 +96,9 @@ async def call_tool(
     """Execute a tool call and return the result as MCP TextContent.
 
     Dispatches to the appropriate service function based on the tool name.
-    All errors are caught and returned as informative text rather than
-    raising, so a failed tool call never crashes the MCP session.
+    Any failure is logged and re-raised so the MCP SDK's own call_tool
+    wrapper can report it as a proper tool error (isError=true) instead of
+    a successful text result.
 
     Args:
         name: The name of the tool to call.
@@ -105,6 +106,10 @@ async def call_tool(
 
     Returns:
         A list containing a single TextContent with the tool result.
+
+    Raises:
+        Exception: Re-raised after logging, so the SDK marks the call as
+            failed instead of reporting it as a successful text result.
     """
     try:
         if name == "get_weather":
@@ -140,11 +145,11 @@ async def call_tool(
                 else:
                     result = f"No {place_type} found in {destination}"
         else:
-            result = f"Unknown tool: {name}"
+            raise ValueError(f"Unknown tool: {name}")
 
     except Exception as e:
         logger.error("MCP tool call failed for %s: %s", name, str(e))
-        result = f"Tool {name} failed: {str(e)}"
+        raise
 
     return [types.TextContent(type="text", text=result)]
 
