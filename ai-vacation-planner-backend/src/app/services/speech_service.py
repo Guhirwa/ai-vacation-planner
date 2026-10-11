@@ -14,6 +14,7 @@ import io
 import json
 import logging
 import tempfile
+import threading
 import os
 from faster_whisper import WhisperModel
 from gtts import gTTS
@@ -27,22 +28,52 @@ logger = logging.getLogger(__name__)
 
 _anthropic_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
-# Load the Whisper model once at module level to avoid reloading on every request
-_whisper_model = WhisperModel(
-    settings.whisper_model_size,
-    device=settings.whisper_device,
-    compute_type=settings.whisper_compute_type,
-)
+# Loaded lazily on first use instead of at import time, so a failure to
+# load it only affects transcription requests instead of preventing the
+# whole API from starting.
+_whisper_model: WhisperModel | None = None
+_whisper_model_lock = threading.Lock()
+
+
+def _get_whisper_model() -> WhisperModel:
+    """Load the Whisper model on first use and cache it for later calls.
+
+    Guarded by a lock so two transcription requests arriving at the same
+    time can't both end up loading the model at once.
+
+    Returns:
+        The loaded WhisperModel instance.
+
+    Raises:
+        HTTPException(503): If the model fails to load.
+    """
+    global _whisper_model
+    if _whisper_model is None:
+        with _whisper_model_lock:
+            if _whisper_model is None:
+                try:
+                    _whisper_model = WhisperModel(
+                        settings.whisper_model_size,
+                        device=settings.whisper_device,
+                        compute_type=settings.whisper_compute_type,
+                    )
+                except Exception as e:
+                    logger.error("Failed to load Whisper model: %s", str(e))
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Speech-to-text is currently unavailable",
+                    )
+    return _whisper_model
 
 
 def _run_whisper_transcription(tmp_path: str) -> str:
     """Run Whisper inference and build the full transcript string.
 
-    This does all of faster-whisper's actual work, including iterating its
-    segment generator, which is where the blocking CPU work actually
-    happens rather than in the initial transcribe() call. Kept as a plain
-    function so it can be run in a worker thread instead of blocking the
-    event loop.
+    This does all of faster-whisper's actual work, including loading the
+    model on first use and iterating its segment generator, which is
+    where the blocking CPU work actually happens rather than in the
+    initial transcribe() call. Kept as a plain function so it can be run
+    in a worker thread instead of blocking the event loop.
 
     Args:
         tmp_path: Path to the temporary audio file to transcribe.
@@ -50,7 +81,8 @@ def _run_whisper_transcription(tmp_path: str) -> str:
     Returns:
         The transcribed text as a plain string.
     """
-    segments, _ = _whisper_model.transcribe(tmp_path, beam_size=5)
+    model = _get_whisper_model()
+    segments, _ = model.transcribe(tmp_path, beam_size=5)
     return " ".join(segment.text.strip() for segment in segments).strip()
 
 
@@ -72,6 +104,7 @@ async def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
 
     Raises:
         HTTPException(500): If transcription fails for any reason.
+        HTTPException(503): If the Whisper model fails to load.
     """
     suffix = os.path.splitext(filename)[-1] or ".wav"
     tmp_path = None
@@ -81,6 +114,8 @@ async def transcribe_audio(audio_bytes: bytes, filename: str) -> str:
             tmp_path = tmp.name
 
         return await asyncio.to_thread(_run_whisper_transcription, tmp_path)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Transcription failed: %s", str(e))
         raise HTTPException(status_code=500, detail="Transcription failed")
