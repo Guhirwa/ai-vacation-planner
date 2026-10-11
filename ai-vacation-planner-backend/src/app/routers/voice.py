@@ -39,6 +39,13 @@ async def transcribe_voice(
     a local Whisper model, then attempts to extract structured trip details
     using Claude. The transcript is always returned even if extraction fails.
 
+    This endpoint only returns a preview, it never creates a trip or
+    writes anything to the database. The intended flow is: call this
+    endpoint, show the returned trip_details to the user so they can
+    correct anything wrong (especially fields listed in
+    fields_defaulted, which were not actually said), then submit the
+    confirmed values as a separate POST /trips/ request.
+
     Args:
         file: The uploaded audio file.
         current_user: The authenticated user making the request.

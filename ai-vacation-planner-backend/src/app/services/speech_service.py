@@ -28,6 +28,13 @@ logger = logging.getLogger(__name__)
 
 _anthropic_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
+# Used to fill in trip details the transcript doesn't actually mention.
+# Applied here rather than left to the model, so we always know which
+# fields were a real guess versus something the user said.
+DEFAULT_TRIP_DAYS = 3
+DEFAULT_TRIP_BUDGET = 1000.0
+DEFAULT_TRIP_STYLE = "comfort"
+
 # Loaded lazily on first use instead of at import time, so a failure to
 # load it only affects transcription requests instead of preventing the
 # whole API from starting.
@@ -128,9 +135,13 @@ async def extract_trip_details(transcript: str) -> TripDetailsFromVoice | None:
     """Extract structured trip details from a voice transcript using Claude.
 
     Sends the transcript to Claude with a structured extraction prompt and
-    parses the response into a TripDetailsFromVoice object. Returns None
-    if extraction fails rather than raising, so the caller can still return
-    the raw transcript even when structured extraction is not possible.
+    parses the response into a TripDetailsFromVoice object. Claude is asked
+    to return null for anything the transcript doesn't actually mention,
+    rather than inventing a plausible-looking value itself, so this
+    function can fill in the real defaults on its own and record which
+    fields were genuinely said versus guessed. Returns None if extraction
+    fails rather than raising, so the caller can still return the raw
+    transcript even when structured extraction is not possible.
 
     Args:
         transcript: The raw text transcript from speech-to-text.
@@ -144,17 +155,14 @@ Transcript: "{transcript}"
 
 Return this exact JSON structure:
 {{
-  "destination": "city name",
-  "days": number,
-  "budget": number in USD,
-  "trip_style": "one of: budget, comfort, luxury, family, adventure, romantic, business"
+  "destination": "city name, or null if not mentioned",
+  "days": number, or null if not mentioned,
+  "budget": number in USD, or null if not mentioned,
+  "trip_style": "one of: budget, comfort, luxury, family, adventure, romantic, business, or null if not mentioned"
 }}
 
-If any field cannot be determined from the transcript use these defaults:
-- days: 3
-- budget: 1000
-- trip_style: "comfort"
-- destination: extract whatever location is mentioned"""
+Only fill in a field if the transcript actually says it. Use null for
+anything not mentioned, do not guess or make up a value yourself."""
 
     try:
         response = await _anthropic_client.messages.create(
@@ -168,7 +176,37 @@ If any field cannot be determined from the transcript use these defaults:
             inner = lines[1:-1] if lines[-1].strip() == "```" else lines[1:]
             raw = "\n".join(inner).strip()
         parsed = json.loads(raw)
-        return TripDetailsFromVoice(**parsed, raw_transcript=transcript)
+
+        destination = parsed.get("destination")
+        if not destination:
+            logger.warning("Trip detail extraction found no destination in transcript")
+            return None
+
+        fields_defaulted = []
+
+        days = parsed.get("days")
+        if days is None:
+            days = DEFAULT_TRIP_DAYS
+            fields_defaulted.append("days")
+
+        budget = parsed.get("budget")
+        if budget is None:
+            budget = DEFAULT_TRIP_BUDGET
+            fields_defaulted.append("budget")
+
+        trip_style = parsed.get("trip_style")
+        if not trip_style:
+            trip_style = DEFAULT_TRIP_STYLE
+            fields_defaulted.append("trip_style")
+
+        return TripDetailsFromVoice(
+            destination=destination,
+            days=days,
+            budget=budget,
+            trip_style=trip_style,
+            fields_defaulted=fields_defaulted,
+            raw_transcript=transcript,
+        )
     except Exception as e:
         logger.warning("Trip detail extraction failed: %s", str(e))
         return None

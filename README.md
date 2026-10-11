@@ -179,6 +179,8 @@ After the agent produces a final response it is validated against the same LLMIt
 ### Voice Input
 The backend accepts audio file uploads and transcribes them to text using a local Whisper model (no API key required). Claude then extracts structured trip details from the transcript so the user can create a trip directly from a voice recording.
 
+This endpoint only returns a preview, it never creates a trip itself. Any field the transcript didn't actually mention gets a default value instead, and its name is listed in `fields_defaulted` so the caller can show the user exactly which values were guessed and need confirming before submitting them as a real trip through `POST /trips/`.
+
 **Supported formats:** mp3, wav, m4a, webm, ogg
 
 **Transcribe audio and extract trip details:**
