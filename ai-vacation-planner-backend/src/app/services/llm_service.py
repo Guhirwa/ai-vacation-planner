@@ -25,6 +25,7 @@ from app.config import settings
 from app.schemas.itinerary import LLMItineraryOutput
 from app.services.knowledge_service import search_knowledge
 from app.services.weather_service import get_weather_summary
+from app.guardrails.output_guardrails import wrap_untrusted_content
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,8 @@ def _build_user_prompt(
     )
     knowledge_section = (
         f"\nLocal knowledge base context (use this to suggest authentic, "
-        f"lesser-known places alongside the well-known ones):\n{knowledge_context}\n"
+        f"lesser-known places alongside the well-known ones):\n"
+        f"{wrap_untrusted_content(knowledge_context)}\n"
         if knowledge_context
         else ""
     )

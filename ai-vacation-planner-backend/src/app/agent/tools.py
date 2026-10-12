@@ -17,6 +17,8 @@ from app.services.knowledge_service import search_knowledge
 from app.database import session_factory
 from app.models.trip import Trip
 from app.config import settings
+from app.guardrails.input_guardrails import InvalidSearchTerm, validate_search_term
+from app.guardrails.output_guardrails import wrap_untrusted_content
 
 NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 
@@ -66,7 +68,7 @@ async def search_travel_knowledge(destination: str, query: str) -> str:
 
     if not result:
         return f"No knowledge found for {destination}"
-    return result
+    return wrap_untrusted_content(result)
 
 
 @tool
@@ -113,6 +115,12 @@ async def get_place_info(destination: str, place_type: str) -> str:
         A plain-English description of relevant places found, or a
         message if none were found.
     """
+    try:
+        validate_search_term(destination, "destination")
+        validate_search_term(place_type, "place_type")
+    except InvalidSearchTerm:
+        return f"Could not find {place_type} information for {destination}"
+
     try:
         # Nominatim is a text-based search, so no coordinates are needed here
         params = {"q": f"{place_type} in {destination}", "format": "json", "limit": 5}

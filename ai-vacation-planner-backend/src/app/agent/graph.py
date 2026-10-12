@@ -94,10 +94,19 @@ async def call_llm(state: AgentState) -> dict:
 
     Returns:
         A dict with a messages key containing the LLM response to append.
+
+    Raises:
+        Exception: Re-raised after logging, so the caller sees the same
+            error every other LLM call site in this codebase surfaces,
+            instead of this being the one silent call site.
     """
     llm = _build_llm()
     messages = [SystemMessage(content=AGENT_SYSTEM_PROMPT)] + state["messages"]
-    response = await llm.ainvoke(messages)
+    try:
+        response = await llm.ainvoke(messages)
+    except Exception as e:
+        logger.error("Agent LLM call failed: %s", str(e))
+        raise
     tool_call_count = len(response.tool_calls) if hasattr(response, "tool_calls") else 0
     logger.info("LLM responded with %d tool call(s)", tool_call_count)
     if tool_call_count > 0:

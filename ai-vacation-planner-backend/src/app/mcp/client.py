@@ -13,6 +13,8 @@ the overhead of subprocess communication for in-process calls.
 import logging
 from app.services.weather_service import get_weather_summary
 from app.services.knowledge_service import search_knowledge
+from app.guardrails.input_guardrails import InvalidSearchTerm, validate_search_term
+from app.guardrails.output_guardrails import wrap_untrusted_content
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +42,19 @@ async def call_mcp_tool(name: str, arguments: dict) -> str:
                 arguments["destination"],
                 arguments.get("query", ""),
             )
-            return result or f"No knowledge found for {arguments['destination']}"
+            if not result:
+                return f"No knowledge found for {arguments['destination']}"
+            return wrap_untrusted_content(result)
 
         elif name == "get_place_info":
             import httpx
             destination = arguments["destination"]
             place_type = arguments["place_type"]
+            try:
+                validate_search_term(destination, "destination")
+                validate_search_term(place_type, "place_type")
+            except InvalidSearchTerm:
+                return f"No {place_type} found in {destination}"
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     "https://nominatim.openstreetmap.org/search",

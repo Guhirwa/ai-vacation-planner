@@ -5,7 +5,7 @@ Router for the travel knowledge base API.
 Exposes endpoints for adding documents and searching the knowledge base.
 """
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from app.dependencies.auth import get_current_user
 from app.models.user import User
 from app.schemas.knowledge import (
@@ -14,6 +14,7 @@ from app.schemas.knowledge import (
     KnowledgeSearchResponse,
 )
 from app.services.knowledge_service import add_document, search_knowledge
+from app.guardrails.input_guardrails import PromptInjectionDetected, check_for_injection
 
 router = APIRouter(prefix="/knowledge", tags=["Knowledge"])
 
@@ -37,7 +38,20 @@ async def create_knowledge(
 
     Returns:
         The number of chunks stored and a confirmation message.
+
+    Raises:
+        HTTPException(400): If the content matches a known prompt-injection
+            pattern, since this content is later retrieved and injected into
+            LLM prompts for any user searching this destination.
     """
+    try:
+        check_for_injection(knowledge.content)
+    except PromptInjectionDetected:
+        raise HTTPException(
+            status_code=400,
+            detail="This content looks like it is trying to override the assistant's instructions and was rejected.",
+        )
+
     chunks_stored = await add_document(
         destination=knowledge.destination,
         content=knowledge.content,

@@ -20,6 +20,8 @@ from mcp import types
 from app.services.weather_service import get_weather_summary
 from app.services.knowledge_service import search_knowledge
 from app.schemas.mcp import TOOL_ARGUMENT_MODELS
+from app.guardrails.input_guardrails import validate_search_term
+from app.guardrails.output_guardrails import wrap_untrusted_content
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +91,15 @@ async def call_tool(
             )
             if not result:
                 result = f"No knowledge found for {arguments['destination']}"
+            else:
+                result = wrap_untrusted_content(result)
 
         elif name == "get_place_info":
             import httpx
             destination = arguments["destination"]
             place_type = arguments["place_type"]
+            validate_search_term(destination, "destination")
+            validate_search_term(place_type, "place_type")
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     "https://nominatim.openstreetmap.org/search",
