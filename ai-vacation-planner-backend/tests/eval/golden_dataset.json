@@ -1,0 +1,30 @@
+[
+  {
+    "name": "standard_comfort_trip",
+    "destination": "Tokyo",
+    "days": 5,
+    "budget": 2000.0,
+    "trip_style": "comfort"
+  },
+  {
+    "name": "long_budget_trip",
+    "destination": "Bangkok",
+    "days": 10,
+    "budget": 800.0,
+    "trip_style": "budget"
+  },
+  {
+    "name": "short_luxury_trip",
+    "destination": "Dubai",
+    "days": 2,
+    "budget": 8000.0,
+    "trip_style": "luxury"
+  },
+  {
+    "name": "family_trip",
+    "destination": "Nairobi",
+    "days": 6,
+    "budget": 3000.0,
+    "trip_style": "family"
+  }
+]
