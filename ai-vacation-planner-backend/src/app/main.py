@@ -7,9 +7,15 @@ from app.routers import auth, trips, itineraries, knowledge, voice, mcp
 from app.routers.auth import user_router
 from app.database import engine, Base
 from app.config import settings
+from app.observability import RequestContextFilter, RequestIDMiddleware
 
 _app_log_handler = logging.StreamHandler()
-_app_log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+_app_log_handler.setFormatter(
+    logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s [request_id=%(request_id)s user_id=%(user_id)s]: %(message)s"
+    )
+)
+_app_log_handler.addFilter(RequestContextFilter())
 
 _app_logger = logging.getLogger("app")
 _app_logger.setLevel(logging.DEBUG)
@@ -23,6 +29,8 @@ app = FastAPI(
     debug=settings.debug,
     redirect_slashes=False
 )
+
+app.add_middleware(RequestIDMiddleware)
 
 app.include_router(auth.router)
 app.include_router(user_router)

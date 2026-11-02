@@ -23,6 +23,7 @@ from fastapi import HTTPException
 
 from app.config import settings
 from app.schemas.voice import TripDetailsFromVoice
+from app.observability import log_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -165,11 +166,14 @@ Only fill in a field if the transcript actually says it. Use null for
 anything not mentioned, do not guess or make up a value yourself."""
 
     try:
-        response = await _anthropic_client.messages.create(
-            model=settings.agent_model,
-            max_tokens=256,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        with log_llm_call("speech.extract_trip_details", settings.agent_model) as usage:
+            response = await _anthropic_client.messages.create(
+                model=settings.agent_model,
+                max_tokens=256,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            usage["input_tokens"] = response.usage.input_tokens
+            usage["output_tokens"] = response.usage.output_tokens
         raw = response.content[0].text.strip()
         if raw.startswith("```"):
             lines = raw.splitlines()
@@ -285,11 +289,14 @@ Itinerary:
 Spoken summary:"""
 
     try:
-        response = await _anthropic_client.messages.create(
-            model=settings.agent_model,
-            max_tokens=512,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        with log_llm_call("speech.summarize_itinerary_for_speech", settings.agent_model) as usage:
+            response = await _anthropic_client.messages.create(
+                model=settings.agent_model,
+                max_tokens=512,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            usage["input_tokens"] = response.usage.input_tokens
+            usage["output_tokens"] = response.usage.output_tokens
         return response.content[0].text.strip()
     except Exception as e:
         logger.warning("Itinerary summarization failed, using fallback: %s", str(e))

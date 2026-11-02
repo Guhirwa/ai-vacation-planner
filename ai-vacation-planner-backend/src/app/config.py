@@ -1,3 +1,4 @@
+from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
@@ -35,6 +36,17 @@ class Settings(BaseSettings):
     whisper_compute_type: str = "int8"
     # Compute type for the Whisper model. "int8" is fastest on CPU.
     # Use "float16" for GPU inference.
+
+    dd_api_key: Optional[str] = None
+    # Datadog API key. Optional, since observability should never block
+    # the app from starting, only set this outside development.
+
+    dd_service: str = "ai-vacation-planner-backend"
+    dd_env: str = "development"
+
+    dd_trace_enabled: bool = False
+    """Turns on Datadog tracing and the request ID middleware. Off by default
+    so a missing or misconfigured Datadog setup never affects local development."""
 
     class Config:
         env_file = ".env"

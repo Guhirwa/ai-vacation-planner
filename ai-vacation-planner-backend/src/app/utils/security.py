@@ -1,6 +1,6 @@
 from datetime import timedelta, datetime, timezone
 from typing import Optional
-from jose import jwt
+from jose import jwt, JWTError
 from passlib.context import CryptContext
 
 from app.config import settings
@@ -23,3 +23,23 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     data_to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(data_to_encode, settings.secret_key, algorithm=settings.algorithm)
     return encoded_jwt
+
+def decode_user_id_for_logging(token: str) -> Optional[str]:
+    """Best-effort decode of the user ID claim from a bearer token, for log tagging only.
+
+    Never raises and never touches the database, so it is safe to call from
+    logging middleware on every request. This is not an authentication
+    check, use get_current_user for that.
+
+    Args:
+        token: The raw JWT string, without the "Bearer " prefix.
+
+    Returns:
+        The user ID claim as a string, or None if the token is missing,
+        expired, or otherwise cannot be decoded.
+    """
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        return payload.get("sub")
+    except JWTError:
+        return None

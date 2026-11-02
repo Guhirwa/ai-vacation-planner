@@ -111,6 +111,7 @@ def mock_anthropic(monkeypatch):
         def __init__(self, text):
             self.content = text
             self.tool_calls = []
+            self.usage_metadata = {"input_tokens": 10, "output_tokens": 10}
 
     state = {"text": '{"days": [{"day": 1, "activities": ["a", "b", "c"]}]}'}
 
