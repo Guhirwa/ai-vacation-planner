@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # Datadog API key. Optional, since observability should never block
     # the app from starting, only set this outside development.
 
-    dd_service: str = "ai-vacation-planner-backend"
+    dd_service: str = "ai_vacation_planner"
     dd_env: str = "development"
 
     dd_trace_enabled: bool = False
