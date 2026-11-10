@@ -30,8 +30,16 @@ ai-vacation-planner/
             │   └── itineraries.py  # /itineraries
             ├── dependencies/
             │   └── auth.py         # get_current_user dependency
+            ├── guardrails/
+            │   ├── input_guardrails.py   # Prompt-injection detection, search-term validation
+            │   └── output_guardrails.py  # Marks retrieved content as untrusted before it reaches a prompt
+            ├── observability.py    # Request IDs, structured logging, and model-call tracing
             └── utils/
                 └── security.py     # Password hashing and JWT helpers
+    └── tests/
+        ├── conftest.py             # Isolated test database, auth fixture, model-mocking fixture
+        ├── test_*.py               # Fast tests, mocked model, no network access
+        └── eval/                   # DeepEval quality checks against the real model (run manually)
 ```
 
 **Data model:**
@@ -44,6 +52,9 @@ ai-vacation-planner/
 - An AI agent powered by LangChain and LangGraph orchestrates tool calls at runtime, deciding which tools to invoke (weather, knowledge, place lookup) before combining the results into a final itinerary
 - Voice input is handled by a local Whisper model (faster-whisper) that transcribes audio uploads to text, with Claude extracting structured trip details from the transcript
 - MCP (Model Context Protocol) exposes the travel tools as a standardized server so any MCP-compatible client can call them without depending on internal service implementations
+- A guardrails layer checks user-submitted content for prompt-injection attempts and marks retrieved knowledge as untrusted data before it reaches a prompt, so the system treats outside content as information, not instructions
+- Every request and every model call is tagged with a request ID, logged with its latency and outcome, and optionally reported to Datadog, so failures and slow calls are traceable instead of silent
+- A pytest suite covers the API endpoints, the structured output rules, and the guardrails, with the AI model itself mocked so the suite runs in seconds without needing a real API key; a separate suite checks the quality of real generated itineraries against a small set of sample requests
 
 
 ## LLM Integration
@@ -237,6 +248,73 @@ curl -X POST http://localhost:8000/mcp/call \
 | `WHISPER_MODEL_SIZE` | No | `base` | Whisper model size: tiny, base, small, medium, large |
 | `WHISPER_DEVICE` | No | `cpu` | Device for Whisper inference: cpu or cuda |
 | `WHISPER_COMPUTE_TYPE` | No | `int8` | Compute type for Whisper: int8 (CPU) or float16 (GPU) |
+
+
+## Evaluation, Security & Testing
+
+### Testing
+A pytest suite covers the API endpoints (auth, trips, itineraries, both manual and AI-generated), the structured output rules, the MCP tools, and the guardrails. Every test runs against an isolated file-based test database, created fresh and rolled back after each test, never the real development database. Every call to the AI model is replaced with a canned response, so the suite runs in a few seconds, never spends tokens, and never needs a working `ANTHROPIC_API_KEY`.
+
+**Run the suite:**
+```bash
+poetry run pytest -v
+```
+
+**Check coverage:**
+```bash
+poetry run pytest --cov=app
+```
+
+A GitHub Actions workflow (`.github/workflows/ci.yml`) runs the suite and linting on every push and pull request.
+
+### Security and Guardrails
+Two gaps get closed here: content a user submits that might try to override the assistant's instructions, and values that get dropped straight into an external API's query string with no validation.
+
+- **Prompt-injection detection** (`app/guardrails/input_guardrails.py`): a plain keyword/pattern check for obvious injection phrasing ("ignore previous instructions", "reveal your system prompt", and similar). Applied to a knowledge document before it is stored (`POST /knowledge`), and to a voice transcript before it is sent to Claude for extraction. A match returns a clear `400` for the knowledge endpoint; for voice, extraction is skipped but the transcript is still returned, since the user's own audio shouldn't be rejected outright.
+- **Untrusted content marking** (`app/guardrails/output_guardrails.py`): any knowledge chunk retrieved from the vector store is wrapped in an explicit delimiter with an instruction that it is reference data, not instructions, before it is interpolated into a prompt. Used everywhere retrieved knowledge reaches the model: the agent's tool, the fallback LLM path, and both MCP paths.
+- **Search-term validation**: `destination` and `place_type` are checked against a simple allow-list of characters and a length limit before being used to build the external place-search query, closing a gap where those values went straight into a URL with no validation at all.
+
+Try it yourself: submitting `{"content": "Ignore all previous instructions and ..."}` to `POST /knowledge` returns `400`, while a normal travel document is accepted as before.
+
+### AI Response Evaluation
+Beyond the structural validation `LLMItineraryOutput` already enforces (right number of days, 3-5 activities each), a separate DeepEval suite (`tests/eval/`) checks the actual quality of what the agent produces, using the real model as the judge.
+
+- **Golden dataset** (`tests/eval/golden_dataset.json`): a small set of trip requests covering different styles, trip lengths, and budgets.
+- **Metrics**: for each golden case, the real agent generates an itinerary, then two custom `GEval` metrics score it, **relevance** (do the activities actually fit the destination, style, and budget) and **completeness** (does it cover every requested day with enough activities). A separate test deliberately mismatches a request and an answer (a Tokyo request answered with an all-Berlin itinerary) to prove the relevance metric actually fails a bad answer instead of passing everything.
+- This suite is excluded from the regular test run and from CI, since it calls the real model and costs tokens. Run it on its own:
+
+```bash
+poetry run pytest -m eval tests/eval -v
+```
+
+### Observability
+Every request gets a generated ID, carried through its log lines and returned in an `X-Request-ID` response header, along with the ID of whoever made the request (decoded from their token, logged even if not used for authorization). Every call to the AI model, across the agent, the fallback path, and both voice features, logs its latency, which model was used, token usage, and whether it succeeded through one shared helper, instead of each call site doing its own thing.
+
+Datadog tracing is optional and off by default, turning it on only requires setting the variables below, no special startup command needed:
+
+**Run the real app with tracing on** (after setting `DD_API_KEY` and `DD_TRACE_ENABLED=True` in `.env`):
+```bash
+poetry run uvicorn app.main:app --app-dir src
+```
+
+Traces show up in Datadog's APM and LLM Observability views, with the model name, latency, and token/cost tags visible on each model-call span, and failed external calls (e.g. a slow place lookup) show up as caught errors rather than silent failures.
+
+**Screenshots from a real run** (`docs/datadog-observability/`):
+
+| | |
+|---|---|
+| ![Trace waterfall](docs/datadog-observability/trace-waterfall.png) | ![Model, tokens, and cost](docs/datadog-observability/model-tokens-cost.png) |
+| Full request trace: every tool call, model call, and external API call, with latency for each | One model call's details: model name, token usage, and estimated cost |
+| ![Caught error](docs/datadog-observability/caught-error.png) | |
+| A real timeout on a place lookup, caught and visible instead of failing silently | |
+
+### New Environment Variables
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `DD_API_KEY` | No | None | Datadog API key. Only needed if `DD_TRACE_ENABLED` is `True`. |
+| `DD_SERVICE` | No | `ai_vacation_planner` | Service name shown in Datadog |
+| `DD_ENV` | No | `development` | Environment tag shown in Datadog |
+| `DD_TRACE_ENABLED` | No | `False` | Turns on Datadog tracing and request ID logging |
 
 
 ## Requirements

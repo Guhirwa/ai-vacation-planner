@@ -13,6 +13,8 @@ the overhead of subprocess communication for in-process calls.
 import logging
 from app.services.weather_service import get_weather_summary
 from app.services.knowledge_service import search_knowledge
+from app.services.places_service import search_places
+from app.guardrails.output_guardrails import wrap_untrusted_content
 
 logger = logging.getLogger(__name__)
 
@@ -40,28 +42,18 @@ async def call_mcp_tool(name: str, arguments: dict) -> str:
                 arguments["destination"],
                 arguments.get("query", ""),
             )
-            return result or f"No knowledge found for {arguments['destination']}"
+            if not result:
+                return f"No knowledge found for {arguments['destination']}"
+            return wrap_untrusted_content(result)
 
         elif name == "get_place_info":
-            import httpx
             destination = arguments["destination"]
             place_type = arguments["place_type"]
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    "https://nominatim.openstreetmap.org/search",
-                    params={
-                        "q": f"{place_type} in {destination}",
-                        "format": "json",
-                        "limit": 5,
-                    },
-                    headers={"User-Agent": "ai-vacation-planner/1.0"},
-                    timeout=10,
-                )
-                places = response.json()
-                if places:
-                    names = [p.get("display_name", "Unknown").split(",")[0] for p in places]
-                    return f"Places of type '{place_type}' in {destination}: {', '.join(names)}"
+            names = await search_places(destination, place_type)
+            if not names:
                 return f"No {place_type} found in {destination}"
+            shortened = [n.split(",")[0] for n in names]
+            return f"Places of type '{place_type}' in {destination}: {', '.join(shortened)}"
 
         else:
             return f"Unknown tool: {name}"

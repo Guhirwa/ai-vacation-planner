@@ -19,7 +19,9 @@ from mcp import types
 
 from app.services.weather_service import get_weather_summary
 from app.services.knowledge_service import search_knowledge
+from app.services.places_service import search_places
 from app.schemas.mcp import TOOL_ARGUMENT_MODELS
+from app.guardrails.output_guardrails import wrap_untrusted_content
 
 logger = logging.getLogger(__name__)
 
@@ -89,28 +91,18 @@ async def call_tool(
             )
             if not result:
                 result = f"No knowledge found for {arguments['destination']}"
+            else:
+                result = wrap_untrusted_content(result)
 
         elif name == "get_place_info":
-            import httpx
             destination = arguments["destination"]
             place_type = arguments["place_type"]
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    "https://nominatim.openstreetmap.org/search",
-                    params={
-                        "q": f"{place_type} in {destination}",
-                        "format": "json",
-                        "limit": 5,
-                    },
-                    headers={"User-Agent": "ai-vacation-planner/1.0"},
-                    timeout=10,
-                )
-                places = response.json()
-                if places:
-                    names = [p.get("display_name", "Unknown").split(",")[0] for p in places]
-                    result = f"Places of type '{place_type}' in {destination}: {', '.join(names)}"
-                else:
-                    result = f"No {place_type} found in {destination}"
+            names = await search_places(destination, place_type)
+            if names:
+                shortened = [n.split(",")[0] for n in names]
+                result = f"Places of type '{place_type}' in {destination}: {', '.join(shortened)}"
+            else:
+                result = f"No {place_type} found in {destination}"
         else:
             raise ValueError(f"Unknown tool: {name}")
 

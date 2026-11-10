@@ -28,6 +28,7 @@ from pydantic import ValidationError
 
 from app.agent.tools import AGENT_TOOLS
 from app.config import settings
+from app.observability import log_llm_call
 from app.schemas.itinerary import LLMItineraryOutput
 
 logger = logging.getLogger(__name__)
@@ -94,10 +95,19 @@ async def call_llm(state: AgentState) -> dict:
 
     Returns:
         A dict with a messages key containing the LLM response to append.
+
+    Raises:
+        Exception: Re-raised after logging, so the caller sees the same
+            error every other LLM call site in this codebase surfaces,
+            instead of this being the one silent call site.
     """
     llm = _build_llm()
     messages = [SystemMessage(content=AGENT_SYSTEM_PROMPT)] + state["messages"]
-    response = await llm.ainvoke(messages)
+    with log_llm_call("agent.call_llm", settings.agent_model) as usage:
+        response = await llm.ainvoke(messages)
+        if response.usage_metadata:
+            usage["input_tokens"] = response.usage_metadata.get("input_tokens")
+            usage["output_tokens"] = response.usage_metadata.get("output_tokens")
     tool_call_count = len(response.tool_calls) if hasattr(response, "tool_calls") else 0
     logger.info("LLM responded with %d tool call(s)", tool_call_count)
     if tool_call_count > 0:

@@ -9,16 +9,14 @@ The agent reads tool names and descriptions to decide which ones
 to call, so descriptions must be specific and action-oriented.
 """
 
-import httpx
 from fastapi import HTTPException
 from langchain_core.tools import tool
 from app.services.weather_service import get_weather_summary
 from app.services.knowledge_service import search_knowledge
+from app.services.places_service import search_places
 from app.database import session_factory
 from app.models.trip import Trip
-from app.config import settings
-
-NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
+from app.guardrails.output_guardrails import wrap_untrusted_content
 
 
 @tool
@@ -66,7 +64,7 @@ async def search_travel_knowledge(destination: str, query: str) -> str:
 
     if not result:
         return f"No knowledge found for {destination}"
-    return result
+    return wrap_untrusted_content(result)
 
 
 @tool
@@ -114,22 +112,13 @@ async def get_place_info(destination: str, place_type: str) -> str:
         message if none were found.
     """
     try:
-        # Nominatim is a text-based search, so no coordinates are needed here
-        params = {"q": f"{place_type} in {destination}", "format": "json", "limit": 5}
-        headers = {"User-Agent": "ai-vacation-planner/1.0"}
-
-        async with httpx.AsyncClient(timeout=settings.weather_api_timeout) as client:
-            response = await client.get(NOMINATIM_SEARCH_URL, params=params, headers=headers)
-            response.raise_for_status()
-            results = response.json()
-
-        if not results:
-            return f"Could not find {place_type} information for {destination}"
-
-        names = [place.get("display_name", "") for place in results if place.get("display_name")]
-        return f"Found {place_type} in {destination}: " + "; ".join(names)
+        names = await search_places(destination, place_type)
     except Exception:
         return f"Could not find {place_type} information for {destination}"
+
+    if not names:
+        return f"Could not find {place_type} information for {destination}"
+    return f"Found {place_type} in {destination}: " + "; ".join(names)
 
 
 # All tools available to the agent

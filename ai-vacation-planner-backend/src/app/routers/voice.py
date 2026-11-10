@@ -22,6 +22,7 @@ from app.services.speech_service import (
     summarize_itinerary_for_speech,
 )
 from app.schemas.voice import TranscribeResponse
+from app.guardrails.input_guardrails import PromptInjectionDetected, check_for_injection
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,13 @@ async def transcribe_voice(
 
     audio_bytes = await file.read()
     transcript = await transcribe_audio(audio_bytes, file.filename)
-    trip_details = await extract_trip_details(transcript)
+
+    try:
+        check_for_injection(transcript)
+        trip_details = await extract_trip_details(transcript)
+    except PromptInjectionDetected:
+        logger.warning("Transcript matched a known prompt-injection pattern, skipping extraction")
+        trip_details = None
 
     return TranscribeResponse(
         transcript=transcript,

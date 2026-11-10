@@ -25,6 +25,8 @@ from app.config import settings
 from app.schemas.itinerary import LLMItineraryOutput
 from app.services.knowledge_service import search_knowledge
 from app.services.weather_service import get_weather_summary
+from app.guardrails.output_guardrails import wrap_untrusted_content
+from app.observability import log_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +84,8 @@ def _build_user_prompt(
     )
     knowledge_section = (
         f"\nLocal knowledge base context (use this to suggest authentic, "
-        f"lesser-known places alongside the well-known ones):\n{knowledge_context}\n"
+        f"lesser-known places alongside the well-known ones):\n"
+        f"{wrap_untrusted_content(knowledge_context)}\n"
         if knowledge_context
         else ""
     )
@@ -145,19 +148,22 @@ async def _call_llm_with_retry(
     logger.debug("LLM user prompt for %s:\n%s", destination, user_prompt)
 
     for attempt in range(1, settings.llm_max_retries + 1):
-        try:
-            response = await _client.messages.create(
-                model=MODEL,
-                max_tokens=4096,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_prompt}],
-            )
-        except APIStatusError:
-            raise HTTPException(status_code=500, detail="AI itinerary generation is temporarily unavailable")
-        except APIConnectionError:
-            raise HTTPException(status_code=500, detail="Could not reach the AI itinerary generation service")
-        except Exception:
-            raise HTTPException(status_code=500, detail="AI itinerary generation failed unexpectedly")
+        with log_llm_call("llm_service._call_llm_with_retry", MODEL) as usage:
+            try:
+                response = await _client.messages.create(
+                    model=MODEL,
+                    max_tokens=4096,
+                    system=SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": user_prompt}],
+                )
+            except APIStatusError:
+                raise HTTPException(status_code=500, detail="AI itinerary generation is temporarily unavailable")
+            except APIConnectionError:
+                raise HTTPException(status_code=500, detail="Could not reach the AI itinerary generation service")
+            except Exception:
+                raise HTTPException(status_code=500, detail="AI itinerary generation failed unexpectedly")
+            usage["input_tokens"] = response.usage.input_tokens
+            usage["output_tokens"] = response.usage.output_tokens
 
         raw = response.content[0].text.strip()
 
